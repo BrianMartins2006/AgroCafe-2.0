@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   ArrowLeft, Search, 
-  UserCircle, MessageSquare, LayoutGrid, BarChart2
+  UserCircle, MessageSquare, LayoutGrid, BarChart2, NotebookPen
 } from 'lucide-react';
 import { getMediaUrl } from '../utils/media';
 
@@ -48,6 +48,7 @@ const Layout: React.FC<LayoutProps> = ({
   const navItems = [
     { label: 'Conversas', icon: MessageSquare, path: '/' },
     { label: 'Atividades', icon: LayoutGrid, path: '/atividades' },
+    { label: 'Anotações', icon: NotebookPen, path: '/anotacoes' },
     { label: 'Custos', icon: BarChart2, path: '/dashboard' },
     { label: 'Perfil', icon: UserCircle, path: '/configuracoes' },
   ];
@@ -160,17 +161,21 @@ const Layout: React.FC<LayoutProps> = ({
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className="flex flex-col items-center justify-center flex-1 py-1 transition-all group"
+                className="flex flex-col items-center justify-center flex-1 min-w-0 px-1 py-1 transition-all group"
               >
-                <div className={`relative flex flex-col items-center gap-1 transition-all`}>
-                  <div className={`px-5 py-1 rounded-full transition-all duration-300 ${isActive ? 'bg-whatsapp-teal/10' : 'group-active:bg-gray-100'}`}>
+                <div className="relative flex flex-col items-center gap-1 transition-all w-full min-w-0">
+                  {/* px-3 (não px-5): com 5 abas o slot de cada item é ~64px e a
+                      pílula de 62px empurrava o vizinho, desalinhando a barra. */}
+                  <div className={`px-3 py-1 rounded-full transition-all duration-300 ${isActive ? 'bg-whatsapp-teal/10' : 'group-active:bg-gray-100'}`}>
                     <Icon 
                       size={22} 
                       className={`transition-colors duration-300 ${isActive ? 'text-whatsapp-teal' : 'text-gray-500'}`}
                       strokeWidth={isActive ? 2.5 : 2}
                     />
                   </div>
-                  <span className={`text-[10px] font-medium transition-colors duration-300 ${isActive ? 'text-whatsapp-teal font-bold' : 'text-gray-500'}`}>
+                  {/* nowrap truca em uma linha só: label quebrado em duas linhas
+                      alterava a altura do slot e deixava os ícones desencontrados. */}
+                  <span className={`text-[10px] font-medium transition-colors duration-300 whitespace-nowrap max-w-full overflow-hidden text-ellipsis ${isActive ? 'text-whatsapp-teal font-bold' : 'text-gray-500'}`}>
                     {item.label}
                   </span>
                 </div>

@@ -340,6 +340,92 @@ const anonVe = await anon('select count(*)::int as n from public.periodo_trabalh
 anonVe[0].n === 0 ? ok('anon não vê períodos') : no('anon leu periodos');
 
 // ---------------------------------------------------------------------------
+// 7.2 Anotações (migration 09)
+// ---------------------------------------------------------------------------
+console.log('\n== anotacoes ==');
+
+// Insert SEM id_usuario, como o frontend faz: o default auth.uid() é que
+// coloca o dono. Se o default faltar, o insert estoura NOT NULL e a tela
+// inteira de anotações quebra — é exatamente o que este teste pega.
+const anotAlice = await asUser(ALICE, `insert into public.anotacao (titulo, conteudo)
+  values ('Comprar adubo', 'Verificar estoque antes da semana que vem')
+  returning id, id_usuario`);
+anotAlice[0]?.id_usuario === ALICE
+  ? ok('id_usuario preenchido por auth.uid() no insert do cliente')
+  : no('default de dono em anotacao', JSON.stringify(anotAlice[0]));
+
+// Imagem ligada à anotação da Alice (URL do Cloudinary, como o app grava).
+await asUser(ALICE, `insert into public.anotacao_imagem (id_anotacao, foto_url)
+  values ($1, 'https://res.cloudinary.com/demo/image/upload/anotacoes/a1.jpg')`, [anotAlice[0].id]);
+
+// Título vazio é barrado pelo check — o form valida no cliente, o banco
+// precisa concordar para quem chegar por outro caminho.
+const tituloVazio = await asUser(ALICE, `insert into public.anotacao (titulo) values ('   ')`)
+  .then(() => false).catch(() => true);
+tituloVazio ? ok('titulo em branco recusado pelo check') : no('aceitou titulo vazio');
+
+// Isolamento: a anotação da invisível para o Bob, texto e imagem.
+const bobVeAnot = await asUser(BOB, `select count(*)::int as n from public.anotacao`);
+bobVeAnot[0].n === 0 ? ok('Bob não vê a anotação da Alice') : no('vazamento de anotacao', JSON.stringify(bobVeAnot));
+
+const bobVeImg = await asUser(BOB, `select count(*)::int as n from public.anotacao_imagem`);
+bobVeImg[0].n === 0 ? ok('Bob não vê a imagem da anotação da Alice') : no('vazamento de imagem', JSON.stringify(bobVeImg));
+
+// IDOR de escrita: Bob tenta editar e apagar a anotação alheia. O update não
+// dá erro (a linha simplesmente não está no escopo dele) — o sinal é 0 linhas,
+// por isso o `returning id`: sem ele a query devolveria [] mesmo se tivesse
+// surtido efeito.
+const bobEdita = await asUser(BOB, `update public.anotacao set titulo = 'tomada' where id = $1
+  returning id`, [anotAlice[0].id]);
+bobEdita.length === 0 ? ok('UPDATE na anotação alheia não surtiu efeito') : no('IDOR de edição', JSON.stringify(bobEdita));
+
+const bobApaga = await asUser(BOB, `delete from public.anotacao where id = $1 returning id`,
+  [anotAlice[0].id]);
+bobApaga.length === 0 ? ok('DELETE da anotação alheia não surtiu efeito') : no('IDOR de delete', JSON.stringify(bobApaga));
+
+// Bob não grava imagem em anotação da Alice: o with check é por join no dono.
+const bobImg = await asUser(BOB, `insert into public.anotacao_imagem (id_anotacao, foto_url)
+  values ($1, 'https://res.cloudinary.com/demo/image/upload/anotacoes/x.jpg')`, [anotAlice[0].id])
+  .then(() => false).catch(() => true);
+bobImg ? ok('Bob não injeta imagem na anotação da Alice') : no('imagem injetada por terceiro');
+
+// Dono lê/edita a própria: os caminhos que precisam funcionar.
+const aliceLe = await asUser(ALICE, `select titulo from public.anotacao where id = $1`, [anotAlice[0].id]);
+aliceLe[0]?.titulo === 'Comprar adubo' ? ok('dono lê a própria anotação') : no('dono não leu', JSON.stringify(aliceLe));
+
+const aliceEdita = await asUser(ALICE, `update public.anotacao set titulo = 'Comprar adubo orgânico'
+  where id = $1 returning titulo`, [anotAlice[0].id]);
+aliceEdita[0]?.titulo === 'Comprar adubo orgânico' ? ok('dono edita a própria anotação') : no('dono não editou');
+
+// updated_at anda sozinho pelo mesmo trigger de tocar_updated_at.
+const anotAntes = await asUser(ALICE, `select updated_at from public.anotacao where id = $1`, [anotAlice[0].id]);
+await new Promise(r => setTimeout(r, 1100));
+const anotDepois = await asUser(ALICE, `update public.anotacao set conteudo = 'estoque confirmado'
+  where id = $1 returning updated_at`, [anotAlice[0].id]);
+new Date(anotDepois[0].updated_at).getTime() > new Date(anotAntes[0].updated_at).getTime()
+  ? ok('updated_at avança no update (trigger reusado)')
+  : no('updated_at congelado em anotacao', JSON.stringify([anotAntes[0], anotDepois[0]]));
+
+// Anon: nenhuma leitura, nenhuma escrita.
+const anonAnot = await anon('select count(*)::int as n from public.anotacao');
+anonAnot[0].n === 0 ? ok('anon não vê anotações') : no('anon leu anotacoes');
+const anonCria = await anon(`insert into public.anotacao (titulo) values ('anon')`)
+  .then(() => false).catch(() => true);
+anonCria ? ok('anon não cria anotação') : no('anon criou anotacao');
+
+// Usuário desativado perde o acesso, como em todo o resto do schema.
+await db.query('update public.usuario set ativo = false where id = $1', [ALICE]);
+const inativoAnot = await asUser(ALICE, 'select titulo from public.anotacao');
+inativoAnot.length === 0 ? ok('usuário desativado não lê anotações') : no('usuario_ativo() ignorado em anotacao');
+await db.query('update public.usuario set ativo = true where id = $1', [ALICE]);
+
+// Cascade anotacao -> imagem: apagar a anotação não deixa imagem órfã.
+await asUser(ALICE, `delete from public.anotacao where id = $1`, [anotAlice[0].id]);
+const sobraImg = await asUser(ALICE, `select count(*)::int as n from public.anotacao_imagem
+  where id_anotacao = $1`, [anotAlice[0].id]);
+sobraImg[0].n === 0 ? ok('delete da anotação apaga as imagens (cascade)') : no('imagem orfa apos cascade');
+
+// ---------------------------------------------------------------------------
 // 8. Default de dono (migration 05)
 // ---------------------------------------------------------------------------
 console.log('\n== default de dono ==');

@@ -11,6 +11,7 @@ import MaquinariosPage from './pages/MaquinariosPage';
 import PeriodosPage from './pages/PeriodosPage';
 import ProfilePage from './pages/ProfilePage';
 import DashboardPage from './pages/DashboardPage';
+import AnotacoesPage from './pages/AnotacoesPage';
 import WelcomePage from './pages/WelcomePage';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -71,6 +72,7 @@ function App() {
               <Route path="/nova-lavoura" element={<NewLavouraPage />} />
               <Route path="/editar-lavoura/:id" element={<NewLavouraPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/anotacoes" element={<AnotacoesPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
