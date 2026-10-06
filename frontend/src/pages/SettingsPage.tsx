@@ -4,7 +4,7 @@ import {
   Users, Truck, ChevronRight, Plus,
   LayoutGrid, Trash2, Edit, X, Check,
   Sprout, Wind, Zap, Droplets, Sun, Hammer,
-  Download
+  Download, CalendarDays
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
@@ -254,6 +254,25 @@ const SettingsPage = () => {
           </div>
         </div>
         
+        {/* Períodos fica em linha cheia, e não como terceiro card do grid de dois:
+            um tile órfão metade vazia ficava torto, e a tela de períodos é o
+            destino de quem já passou pela equipe, não um atalho do mesmo peso. */}
+        <button
+          onClick={() => navigate('/periodos')}
+          className="w-full flex items-center gap-4 p-5 bg-white rounded-[2.5rem] shadow-sm border border-gray-50 active:scale-[0.98] transition-all text-left"
+        >
+          <div className="w-12 h-12 bg-whatsapp-teal/10 text-whatsapp-teal rounded-2xl flex items-center justify-center shrink-0">
+            <CalendarDays size={24} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-black text-gray-800">Períodos de Trabalho</p>
+            <p className="text-xs text-gray-400 font-medium truncate">
+              Valor por dia e total por funcionário
+            </p>
+          </div>
+          <ChevronRight size={20} className="text-gray-300" />
+        </button>
+
         {/* Instalação do PWA — fica ao lado do perfil, que é onde se espera
             encontrar "instalar o app". Antes era uma seção "App & Performance"
             com limpeza de cache e uma dica de velocidade que não é mais

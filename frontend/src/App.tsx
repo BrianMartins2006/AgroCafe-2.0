@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage';
 import ActivitiesPage from './pages/ActivitiesPage';
 import FuncionariosPage from './pages/FuncionariosPage';
 import MaquinariosPage from './pages/MaquinariosPage';
+import PeriodosPage from './pages/PeriodosPage';
 import ProfilePage from './pages/ProfilePage';
 import DashboardPage from './pages/DashboardPage';
 import WelcomePage from './pages/WelcomePage';
@@ -65,6 +66,7 @@ function App() {
               <Route path="/configuracoes" element={<SettingsPage />} />
               <Route path="/funcionarios" element={<FuncionariosPage />} />
               <Route path="/maquinarios" element={<MaquinariosPage />} />
+              <Route path="/periodos" element={<PeriodosPage />} />
               <Route path="/perfil" element={<ProfilePage />} />
               <Route path="/nova-lavoura" element={<NewLavouraPage />} />
               <Route path="/editar-lavoura/:id" element={<NewLavouraPage />} />

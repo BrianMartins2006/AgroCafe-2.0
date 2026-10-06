@@ -1,53 +1,13 @@
-import { PGlite } from '@electric-sql/pglite';
-import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-// Relativo ao próprio script: o harness roda de qualquer diretório e sobrevive
-// a mover o repositório de lugar.
-const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+import { novoBanco, migrations, lerMigration } from './base-pg.mjs';
 
 // Ordem: o CLI aplica por timestamp do nome do arquivo.
-const files = readdirSync(MIG_DIR).filter(f => f.endsWith('.sql')).sort();
+const files = migrations();
 
-// memory:// garante banco novo a cada execução — sem isso o estado persiste
-// entre runs e os fixtures colidem na chave primária.
-const db = new PGlite({ dataDir: 'memory://', extensions: { pgcrypto } });
+const db = await novoBanco();
 let pass = 0, fail = 0;
 
 const ok = (label) => { pass++; console.log(`  ok   ${label}`); };
 const no = (label, extra) => { fail++; console.log(`  FAIL ${label}${extra ? ` — ${extra}` : ''}`); };
-
-// ---------------------------------------------------------------------------
-// 1. Schema auth falso (no Supabase real isso já existe)
-// ---------------------------------------------------------------------------
-await db.exec(`
-  create schema auth;
-
-  create table auth.users (
-    id                 uuid primary key default gen_random_uuid(),
-    email              text unique,
-    raw_user_meta_data jsonb not null default '{}'::jsonb
-  );
-
-  create or replace function auth.uid() returns uuid language sql stable as $$
-    select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
-  $$;
-
-  create or replace function auth.role() returns text language sql stable as $$
-    select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), 'anon');
-  $$;
-
-  create role anon nologin;
-  create role authenticated nologin;
-  grant usage on schema public to anon, authenticated;
-  -- Sem isso, uma query que chame auth.uid() direto falha com
-  -- "permission denied for schema auth". As policies escapam porque são
-  -- avaliadas com privilégio do dono da tabela; uma chamada na cláusula WHERE
-  -- é do usuário. No Supabase real as duas roles já têm usage em auth.
-  grant usage on schema auth to anon, authenticated;
-`);
 
 // ---------------------------------------------------------------------------
 // 2. Aplicar as migrations, na ordem
@@ -55,7 +15,7 @@ await db.exec(`
 console.log('\n== migrations ==');
 for (const f of files) {
   try {
-    await db.exec(readFileSync(`${MIG_DIR}/${f}`, 'utf8'));
+    await db.exec(lerMigration(f));
     ok(f);
   } catch (e) {
     no(f, e.message);
@@ -252,6 +212,132 @@ semTipo ? ok('atividade com tipo inexistente recusada por FK') : no('FK de tipo_
 
 const cascade = await asUser(ALICE, 'select count(*)::int as n from public.atividade_imagem');
 cascade[0].n === 0 ? ok('cascade lavoura->atividade->imagem íntegro') : no('cascade');
+
+// ---------------------------------------------------------------------------
+// 7.1 Período de trabalho (migration 08)
+// ---------------------------------------------------------------------------
+console.log('\n== periodo de trabalho ==');
+
+// O seed não cria funcionários, e a tabela de período depende de um.
+if ((await asUser(ALICE, `select id from public.funcionario limit 1`)).length === 0) {
+  await asUser(ALICE, `insert into public.funcionario (nome, cargo, id_usuario)
+    values ('Ana Colheita', 'Colheita', auth.uid())`);
+  await asUser(BOB, `insert into public.funcionario (nome, cargo, id_usuario)
+    values ('Bruno Plantio', 'Plantio', auth.uid())`);
+}
+
+const idFunc = (await asUser(ALICE, `select id from public.funcionario
+  where id_usuario = auth.uid() order by id limit 1`))[0].id;
+
+// Total é coluna gerada: o banco calcula, o cliente não manda.
+const per = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias)
+  values ($1, '2026-10-01', '2026-10-10', 150, 8) returning id, valor_total`, [idFunc]);
+per[0]?.valor_total === '1200.00'
+  ? ok('valor_total calculado pelo banco (8 x 150)')
+  : no('valor_total gerado', JSON.stringify(per[0]));
+
+// Gravar no total é impossível: o banco recusa a coluna gerada.
+const mexerNoTotal = await asUser(ALICE, `update public.periodo_trabalho
+  set valor_total = 999999 where id = ${per[0].id}`)
+  .then(() => false)
+  .catch(e => /can only be updated to DEFAULT/i.test(e.message));
+mexerNoTotal
+  ? ok('total não pode ser forjado (coluna gerada)')
+  : no('total forjável');
+
+const mudouDias = await asUser(ALICE, `update public.periodo_trabalho
+  set dias = 4 where id = ${per[0].id} returning valor_total`);
+mudouDias[0]?.valor_total === '600.00'
+  ? ok('total recalcula sozinho quando os dias mudam')
+  : no('recalculo', JSON.stringify(mudouDias[0]));
+
+// Período em aberto: a coluna data_termino aceita null.
+const aberto = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, valor_dia, dias)
+  values ($1, '2026-09-01', 100, 40) returning id, data_termino`, [idFunc]);
+aberto[0]?.data_termino === null ? ok('período em aberto grava término nulo') : no('aberto', JSON.stringify(aberto[0]));
+
+// O índice único existe para o dia não ser pago duas vezes.
+const segundoAberto = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, valor_dia, dias)
+  values ($1, '2026-09-15', 100, 20)`, [idFunc]).then(() => false).catch(() => true);
+segundoAberto ? ok('não deixa dois períodos em aberto do mesmo funcionário') : no('aceitou 2 abertos');
+
+// calculo_manual é o que separa "contei pelo calendário" de "digitei".
+// Sem ele um lançamento manual de período aberto seria recontado na tela.
+const manual = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias, calculo_manual)
+  values ($1, '2026-07-01', '2026-07-31', 120, 15, true) returning calculo_manual`, [idFunc]);
+manual[0]?.calculo_manual === true ? ok('calculo_manual TRUE gravado') : no('manual true', JSON.stringify(manual[0]));
+
+const porDatas = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias)
+  values ($1, '2026-06-01', '2026-06-30', 120, 30) returning id, calculo_manual`, [idFunc]);
+porDatas[0]?.calculo_manual === false
+  ? ok('calculo_manual default false quando a contagem vem das datas')
+  : no('default calculo_manual', JSON.stringify(porDatas[0]));
+
+// O updated_at precisa andar sozinho: sem trigger a coluna travaria na criação
+// e qualquer ordenação por alteração recente mentiria.
+const antesDoToque = await asUser(ALICE, `select updated_at from public.periodo_trabalho where id = $1`, [porDatas[0].id]);
+await new Promise(r => setTimeout(r, 1100));
+const depoisDoToque = await asUser(ALICE, `update public.periodo_trabalho
+  set observacao = 'corrigido' where id = $1 returning updated_at`, [porDatas[0].id]);
+new Date(depoisDoToque[0].updated_at).getTime() > new Date(antesDoToque[0].updated_at).getTime()
+  ? ok('updated_at avança no update (trigger)')
+  : no('updated_at congelado', JSON.stringify([antesDoToque[0], depoisDoToque[0]]));
+
+// updated_at é intocável pelo cliente também.
+const forjarTimestamp = await asUser(ALICE, `update public.periodo_trabalho
+  set updated_at = '2020-01-01' where id = $1 returning updated_at`, [porDatas[0].id]);
+!String(forjarTimestamp[0]?.updated_at).startsWith('2020-01-01')
+  ? ok('updated_at do cliente é descartado pelo trigger')
+  : no('aceitou updated_at do cliente', JSON.stringify(forjarTimestamp[0]));
+
+await asUser(ALICE, `delete from public.periodo_trabalho where id in ($1, $2)`, [manual[0].id, porDatas[0].id]);
+
+// Períodos fechados repetidos são permitidos: saiu e voltou.
+const fechou = await asUser(ALICE, `update public.periodo_trabalho
+  set data_termino = '2026-09-30' where id = ${aberto[0].id} returning id`);
+fechou[0] ? ok('período aberto pode ser fechado') : no('fechamento');
+const segundoFechado = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias)
+  values ($1, '2026-10-01', '2026-10-05', 100, 5) returning id`, [idFunc]);
+segundoFechado[0] ? ok('vários períodos fechados do mesmo funcionário') : no('periodos multiplos');
+
+const terminoAntes = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias)
+  values ($1, '2026-10-10', '2026-10-01', 100, 5)`, [idFunc]).then(() => false).catch(() => true);
+terminoAntes ? ok('término antes do início recusado pelo check') : no('aceitou término invertido');
+
+const zeroDias = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, valor_dia, dias)
+  values ($1, '2026-10-01', 100, 0)`, [idFunc]).then(() => false).catch(() => true);
+zeroDias ? ok('zero dias recusado pelo check') : no('aceitou 0 dias');
+
+const valorNegativo = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, valor_dia, dias)
+  values ($1, '2026-10-01', -50, 5)`, [idFunc]).then(() => false).catch(() => true);
+valorNegativo ? ok('valor do dia negativo recusado') : no('aceitou valor negativo');
+
+const descarteForaDoPeriodo = await asUser(ALICE, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, data_termino, valor_dia, dias, dias_descartados)
+  values ($1, '2026-10-01', '2026-10-05', 100, 5,
+          array['2026-11-30']::date[]) returning id`, [idFunc]);
+descarteForaDoPeriodo[0] ? ok('dias_descartados guarda array de datas') : no('array de datas');
+
+// A conta do Bob não enxerga nem toca no período da Alice.
+const bobVe = await asUser(BOB, `select count(*)::int as n from public.periodo_trabalho`);
+bobVe[0].n === 0 ? ok('Bob não vê o período da Alice') : no('vazamento entre contas', JSON.stringify(bobVe));
+
+const bobEscreve = await asUser(BOB, `insert into public.periodo_trabalho
+  (id_funcionario, data_inicio, valor_dia, dias)
+  values ($1, '2026-10-01', 100, 5)`, [per[0].id_funcionario]).then(() => false).catch(() => true);
+bobEscreve ? ok('Bob não cria período em cima do funcionário da Alice') : no('Bob gravou para a Alice');
+
+const anonVe = await anon('select count(*)::int as n from public.periodo_trabalho');
+anonVe[0].n === 0 ? ok('anon não vê períodos') : no('anon leu periodos');
 
 // ---------------------------------------------------------------------------
 // 8. Default de dono (migration 05)

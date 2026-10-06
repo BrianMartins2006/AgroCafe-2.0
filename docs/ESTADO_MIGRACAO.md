@@ -47,6 +47,7 @@ Migrations aplicadas com `npx supabase db push`. Confirmado via
 | `20261005120500_view_lavoura.sql` | `default auth.uid()` em `id_usuario` + view `lavoura_com_ultima_atividade` |
 | `20261005120600_tipo_atividade_escrita.sql` | INSERT/UPDATE/DELETE no catálogo de categorias. **Aplicada** |
 | `20261005120700_trigger_foto_perfil.sql` | trigger de signup grava `foto_url`. **PENDENTE de aplicar** |
+| `20261005120800_periodo_trabalho.sql` | `periodo_trabalho`: valor/dia, datas, `dias`, total gerado, RLS. **PENDENTE de aplicar** |
 
 Decisões de modelagem que já estão travadas no schema:
 - `lavoura`, `funcionario`, `maquinario` têm `id_usuario NOT NULL` (dono obrigatório).
@@ -55,7 +56,7 @@ Decisões de modelagem que já estão travadas no schema:
 
 ### Testes
 ```
-cd supabase/tests && npm run test:all   # 36 RLS + 10 de data
+cd supabase/tests && npm run test:all   # 55 RLS + 10 data + 45 período + 21 script
 ```
 Rodam sobre PGlite (Postgres real em memória), não em mock. Cobrem isolamento
 entre dois usuários, IDOR, integridade do catálogo, `usuario` desativado, anon,
@@ -104,7 +105,8 @@ por esta fase.
 
 ### Estado de validação (após as Fases C e D)
 - `npm run build` — **verde**.
-- `npm run test:all` — **27/27** no PGlite (RLS) + **10/10** em `teste-data.mjs`
+- `npm run test:all` — **55/55** no PGlite (RLS) + **10/10** em `teste-data.mjs`
+  + **45/45** em `teste-periodo.mjs` + **21/21** em `teste-script-periodos.mjs`
   (função pura de data, que é onde mora o bug do 22023).
 - `npx tsc --noEmit` — **sem erros**.
 - `npm run lint` — os 4 arquivos do chat/dashboard/atividades/perfil caíram de
@@ -509,11 +511,117 @@ INSERT volta com 403 (42501).
 
 ---
 
-## 12. Pendências manuais (não são código)
+## 12. Períodos de trabalho — 05/10 (migration 08)
+
+Conta de pagamento por funcionário: valor do dia, período e total. Substitui a
+contagem manual que o MySQL não tinha.
+
+### Regras
+
+- Conta **todos os dias de calendário** por padrão, início e fim incluídos.
+- `data_termino` nula = **período em aberto**, que conta até hoje.
+- Vários períodos por funcionário; só **um aberto por vez** (índice único), senão
+  o mesmo dia seria pago duas vezes.
+- O total é **`generated always as (dias * valor_dia) stored`**. Não entra no
+  INSERT nem no UPDATE — o banco responde "can only be updated to DEFAULT", e
+  isso está coberto por teste. É o que garante que o valor exibido e o gravado
+  não divirjam.
+- Duas formas de ajustar a contagem, ambas caem no mesmo campo `dias`:
+  1. excluir datas específicas (`dias_descartados date[]`);
+  2. digitar o número direto, sem abrir o calendário.
+
+### `calculo_manual`: a coluna que impede um bug silencioso
+
+Os dois caminhos acima gravam um inteiro em `dias`. Só com o inteiro não dá para
+saber se um período **aberto** deve continuar contando sozinho ou respeitar o
+número digitado — e sem isso o cálculo automático sobrescrevia na tela o
+lançamento manual, e a tabela passava a mostrar um total diferente do salvo.
+
+Por isso `calculo_manual boolean not null default false` é persistido:
+
+- `false` → `dias` vem das datas; período aberto continua contando até hoje.
+- `true`  → `dias` foi ditado; respeitado como digitado, mesmo aberto.
+
+`frontend/src/services/periodos.ts` passa `diasManuais` para `aoVivo()` só quando
+`calculo_manual` é true, e `PeriodosPage.abrirEdicao()` reabre o campo de dias
+nesse caso.
+
+### O bug que o teste pegou
+
+A migration criava as quatro policies e **nunca ligava RLS na tabela nova**.
+Sem `enable row level security` as policies são decorativas: o teste mostrou
+`anon` lendo os 4 períodos da outra conta. O `alter table ... enable row level
+security` está no mesmo arquivo, com comentário explicando, e
+`teste-script-periodos.mjs` checa `relrowsecurity` explicitamente — é a
+asserção que mais vale aqui, porque a falha é invisível a olho nu.
+
+### `updated_at`
+
+Primeira tabela do schema com `updated_at`, então o trigger
+`tocar_updated_at()` foi criado aqui. Sem ele a coluna congelava no valor da
+inserção. O trigger **descarta** valor vindo do cliente em vez de recusar:
+`set updated_at = '2020-01-01'` passa sem erro e é sobreposto — há teste
+garantindo que a data enviada não sobrevive.
+
+### Instalação manual — dois scripts, e qual usar
+
+`supabase/diagnostico_periodos.sql` primeiro. É só leitura e diz em qual dos
+dois estados a tabela está.
+
+| Estado | Script |
+|---|---|
+| Tabela não existe | `aplicar_periodos.sql` |
+| Tabela existe | `reparar_periodos.sql` |
+
+`aplicar_periodos.sql` tem guarda de porta que aborta se a tabela já existir.
+Preferi isso a `create table if not exists`: num script meio aplicado, o `if
+not exists` seguiria adiante e deixaria trigger e policies pela metade, com a
+tela funcionando e a segurança furada — falha silenciosa é pior que erro
+vermelho.
+
+`reparar_periodos.sql` é o caminho do projeto real. `teste-script-periodos.mjs`
+compara o catálogo (colunas, policies, índices, checks, triggers) do script
+contra o da migration e exige igualdade — é o que impede o SQL colado no painel
+de divergir do repo.
+
+### Estado real em 06/10: instalado pela metade
+
+O diagnóstico no projeto `apwmdbtpczylzowfrmvb` devolveu:
+
+```
+rls ligado          true
+policies            4  (texto idêntico à migration)
+calculo_manual      AUSENTE das colunas
+trigger updated_at  0
+```
+
+Ou seja: a tabela veio de uma versão anterior do script, aplicada antes de
+`calculo_manual` e do trigger existirem. RLS e policies estão corretos.
+
+**Consequência que não é óbvia:** o frontend pede `calculo_manual` no `select=`,
+e o PostgREST responde **PGRST204** para coluna que ele não resolve no schema
+cache. Foi esse o erro do POST na tela — não era tabela ausente nem cache velho,
+as duas leituras que eu dei primeiro e estavam erradas.
+
+Por isso a ordem importa: **rodar `reparar_periodos.sql` ANTES de publicar o
+frontend novo.** No sentido inverso, a tela de períodos quebra com PGRST204
+enquanto o reparo não for aplicado. O script termina com
+`notify pgrst, 'reload schema'` justamente para não depender de espera.
+
+### Ainda não verificado no navegador
+
+Nada foi testado na UI real: só o cálculo puro (`teste-periodo.mjs`, 45 casos),
+o schema e os scripts. Falta o reparo aplicado, `aplicar_trigger_foto.sql` e o
+testo de tela.
+
+---
+
+## 13. Pendências manuais (não são código)
 
 | Item | Onde |
 |---|---|
 | Rodar `aplicar_trigger_foto.sql` | SQL Editor do Supabase |
+| Rodar `reparar_periodos.sql` | SQL Editor do Supabase — **antes do deploy** |
 | Rotacionar API secret do Cloudinary | Cloudinary → Settings |
 | Apagar asset de teste `vrsmiiajamsfl9vi06ic` | Cloudinary Media Library |
 | Apagar conta de teste `tmpdiag12345@gmail.com` | Supabase → Authentication |
