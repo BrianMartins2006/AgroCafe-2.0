@@ -5,22 +5,20 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import {
+  listarMaquinarios,
+  criarMaquinario,
+  atualizarMaquinario,
+  deletarMaquinario,
+  type Maquinario,
+} from '../services/maquinarios';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
-
-interface Maquinario {
-  id_maquina: number;
-  tipo: string;
-  modelo: string;
-  valor_hora: number;
-  consumo_medio: number;
-}
 
 const MaquinariosPage = () => {
   const queryClient = useQueryClient();
   const { data: maquinarios = [], isLoading: loading } = useQuery<Maquinario[]>({
     queryKey: ['maquinarios'],
-    queryFn: () => api.get('/api/v1/maquinarios').then(res => res.json())
+    queryFn: listarMaquinarios
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -34,38 +32,24 @@ const MaquinariosPage = () => {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data: any) => {
-      const endpoint = editingMaq ? `/api/v1/maquinarios/${editingMaq.id_maquina}` : '/api/v1/maquinarios';
-      return editingMaq ? api.put(endpoint, data) : api.post(endpoint, data);
-    },
-    onMutate: async (data: any) => {
-      await queryClient.cancelQueries({ queryKey: ['maquinarios'] });
-      const previous = queryClient.getQueryData(['maquinarios']);
-
-      const optimisticMaq = {
-        id_maquina: editingMaq ? editingMaq.id_maquina : Date.now(),
-        ...data,
+    mutationFn: (data: typeof form) => {
+      const payload = {
+        tipo: data.tipo,
+        modelo: data.modelo,
         valor_hora: Number(data.valor_hora),
-        consumo_medio: Number(data.consumo_medio)
+        consumo_medio: Number(data.consumo_medio),
       };
-
+      return editingMaq
+        ? atualizarMaquinario(editingMaq.id_maquina, payload)
+        : criarMaquinario(payload);
+    },
+    onSuccess: () => {
       setIsModalOpen(false);
       setEditingMaq(null);
       setForm({ tipo: '', modelo: '', valor_hora: '', consumo_medio: '' });
-
-      queryClient.setQueryData(['maquinarios'], (old: any) => {
-        if (!old) return old;
-        if (editingMaq) {
-          return old.map((m: any) => m.id_maquina === optimisticMaq.id_maquina ? optimisticMaq : m);
-        }
-        return [...old, optimisticMaq];
-      });
-
-      return { previous };
     },
-    onError: (_err, _data, context: any) => {
-      queryClient.setQueryData(['maquinarios'], context.previous);
-      toast.error("Erro ao salvar máquina.");
+    onError: (err: Error) => {
+      toast.error(err.message || "Erro ao salvar máquina.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['maquinarios'] });
@@ -73,21 +57,20 @@ const MaquinariosPage = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/v1/maquinarios/${id}`),
+    mutationFn: (id: number) => deletarMaquinario(id),
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: ['maquinarios'] });
-      const previous = queryClient.getQueryData(['maquinarios']);
+      const previous = queryClient.getQueryData<Maquinario[]>(['maquinarios']);
 
-      queryClient.setQueryData(['maquinarios'], (old: any) => {
-        if (!old) return old;
-        return old.filter((m: any) => m.id_maquina !== id);
-      });
+      queryClient.setQueryData<Maquinario[]>(['maquinarios'], (old) =>
+        old?.filter((m) => m.id_maquina !== id) ?? old
+      );
 
       return { previous };
     },
-    onError: (_err, _id, context: any) => {
-      queryClient.setQueryData(['maquinarios'], context.previous);
-      toast.error("Erro ao excluir.");
+    onError: (err: Error, _id, context: { previous: Maquinario[] | undefined } | undefined) => {
+      queryClient.setQueryData(['maquinarios'], context?.previous);
+      toast.error(err.message || "Erro ao excluir.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['maquinarios'] });
@@ -127,8 +110,8 @@ const MaquinariosPage = () => {
   const openEdit = (maq: Maquinario) => {
     setEditingMaq(maq);
     setForm({ 
-      tipo: maq.tipo, 
-      modelo: maq.modelo, 
+      tipo: maq.tipo ?? '', 
+      modelo: maq.modelo ?? '', 
       valor_hora: maq.valor_hora.toString(), 
       consumo_medio: maq.consumo_medio.toString() 
     });

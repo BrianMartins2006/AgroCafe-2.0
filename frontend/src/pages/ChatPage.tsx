@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
@@ -10,7 +10,18 @@ import {
 import Layout from '../components/Layout';
 import MediaPicker from '../components/MediaPicker';
 import { useDraggableScroll } from '../hooks/useDraggableScroll';
-import { api } from '../services/api';
+import { listarLavouras } from '../services/lavouras';
+import { listarTiposAtividade, type TipoAtividade } from '../services/catalogo';
+import { listarFuncionarios, type Funcionario } from '../services/funcionarios';
+import {
+  listarAtividades,
+  criarAtividade,
+  atualizarAtividade,
+  deletarAtividade,
+  type Atividade,
+} from '../services/atividades';
+import { uploadImagem } from '../services/cloudinary';
+import { QUERY, invalidarAtividades } from '../services/atividadesCache';
 import { compressImage } from '../utils/imageCompression';
 import { Clock, Check as CheckIcon } from 'lucide-react';
 import { getMediaUrl } from '../utils/media';
@@ -43,6 +54,10 @@ const ChatPage = () => {
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingAtv, setEditingAtv] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // O upload deixou de ser mutation do React Query (virou chamada direta ao
+  // Cloudinary dentro de handleFilesSelected), então o spinner precisa de um
+  // estado próprio para não aparecer como "salvando atividade".
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [showRespDropdown, setShowRespDropdown] = useState(false);
   const [showMediaOptions, setShowMediaOptions] = useState(false);
   const [isEditingRespDropdown, setIsEditingRespDropdown] = useState(false);
@@ -61,27 +76,29 @@ const ChatPage = () => {
   // Queries (Persistence habilitada no App.tsx)
   const { data: lavouras = [] } = useQuery({
     queryKey: ['lavouras'],
-    queryFn: () => api.get('/api/v1/lavouras').then(res => res.json())
+    queryFn: listarLavouras
   });
   
-  const lavoura = lavouras.find((l: any) => l.id === Number(id));
+  const lavoura = lavouras.find((l) => l.id === Number(id));
 
-  const { data: tipos = [] } = useQuery({
+  const { data: tipos = [] } = useQuery<TipoAtividade[]>({
     queryKey: ['tipos-atividade'],
-    queryFn: () => api.get('/api/v1/tipos-atividade').then(res => res.json()),
+    queryFn: listarTiposAtividade,
   });
 
-  const { data: funcionarios = [] } = useQuery({
+  const { data: funcionarios = [] } = useQuery<Funcionario[]>({
     queryKey: ['funcionarios'],
-    queryFn: () => api.get('/api/v1/funcionarios').then(res => res.json())
+    queryFn: listarFuncionarios
   });
 
-  const { data: atividadesData, isLoading, isFetching } = useQuery({
-    queryKey: ['atividades', id],
-    queryFn: () => api.get(`/api/v1/lavouras/${id}/atividades`).then(res => res.json()),
-    enabled: !!id
+  const idLavoura = Number(id);
+
+  const { data: atividadesData, isLoading, isFetching } = useQuery<Atividade[]>({
+    queryKey: QUERY.chat(idLavoura),
+    queryFn: () => listarAtividades(idLavoura),
+    enabled: !!idLavoura
   });
-  const atividades: any[] = Array.isArray(atividadesData) ? atividadesData : [];
+  const atividades: Atividade[] = useMemo(() => atividadesData ?? [], [atividadesData]);
 
   // Efeito para definir a categoria padrão assim que carregar
   useEffect(() => {
@@ -92,11 +109,15 @@ const ChatPage = () => {
 
   // Mutations
   const createMutation = useMutation({
-    mutationFn: (newData: any) => api.post('/api/v1/atividades', { ...newData, id_lavoura: Number(id) }),
-    onMutate: async (newData) => {
-      await queryClient.cancelQueries({ queryKey: ['atividades', id] });
-      const previousAtividades = queryClient.getQueryData(['atividades', id]);
-
+    mutationFn: (newData: typeof newAtvForm) => criarAtividade({
+      id_lavoura: idLavoura,
+      id_tipo_atividade: newData.id_tipo_atividade,
+      descricao: newData.descricao,
+      responsavel: newData.responsavel,
+      data: newData.data,
+      imagens: newData.fotos,
+    }),
+    onSuccess: () => {
       setNewAtvForm({ 
         descricao: '', 
         id_tipo_atividade: tipos[0]?.id || 0, 
@@ -105,80 +126,53 @@ const ChatPage = () => {
         fotos: [] 
       });
       setShowNewModal(false);
-
-      const optimisticAtv = {
-        id: Date.now(),
-        ...newData,
-        id_lavoura: Number(id),
-        tipo: tipos.find((t: any) => t.id === newData.id_tipo_atividade) || { id: 0, nome: 'Geral', icone: 'Default', cor: 'bg-gray-500' },
-        imagens: newData.fotos.map((url: string) => ({ id: Math.random(), foto_url: url })),
-        status: 'pending'
-      };
-
-      queryClient.setQueryData(['atividades', id], (old: any) => [...(old || []), optimisticAtv]);
-      return { previousAtividades };
     },
-    onError: (_err, _newData, context: any) => {
-      queryClient.setQueryData(['atividades', id], context.previousAtividades);
-      toast.error('Erro ao registrar atividade. Tente novamente.');
+    onError: (err: Error) => {
+      toast.error(err.message || 'Erro ao registrar atividade. Tente novamente.');
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['atividades', id] });
+    onSettled: async () => {
+      await Promise.all(invalidarAtividades(queryClient, idLavoura));
     }
   });
 
   const updateMutation = useMutation({
-    mutationFn: (atv: any) => api.put(`/api/v1/atividades/${atv.id}`, {
+    mutationFn: (atv: any) => atualizarAtividade(atv.id, {
       descricao: atv.descricao,
       id_tipo_atividade: atv.tipo.id,
       responsavel: atv.responsavel,
       data: atv.data,
-      fotos: atv.imagens.map((img: any) => img.foto_url)
+      imagens: atv.imagens.map((img: Atividade['imagens'][number]) => img.foto_url),
     }),
-    onMutate: async (atv: any) => {
-      await queryClient.cancelQueries({ queryKey: ['atividades', id] });
-      const previous = queryClient.getQueryData(['atividades', id]);
+    onSuccess: () => {
       setEditingAtv(null);
-
-      queryClient.setQueryData(['atividades', id], (old: any) => {
-        if (!old) return old;
-        return old.map((o: any) => o.id === atv.id ? { ...o, ...atv, status: 'pending' } : o);
-      });
-      return { previous };
     },
-    onError: (_err, _atv, context: any) => {
-      queryClient.setQueryData(['atividades', id], context.previous);
-      toast.error('Erro ao atualizar atividade.');
+    onError: (err: Error) => {
+      toast.error(err.message || 'Erro ao atualizar atividade.');
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['atividades', id] });
+    onSettled: async () => {
+      await Promise.all(invalidarAtividades(queryClient, idLavoura));
     }
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (atvId: number) => api.delete(`/api/v1/atividades/${atvId}`),
+    mutationFn: (atvId: number) => deletarAtividade(atvId),
     onMutate: async (atvId: number) => {
-      await queryClient.cancelQueries({ queryKey: ['atividades', id] });
-      const previous = queryClient.getQueryData(['atividades', id]);
+      await queryClient.cancelQueries({ queryKey: QUERY.chat(idLavoura) });
+      const previous = queryClient.getQueryData<Atividade[]>(QUERY.chat(idLavoura));
       setDeletingId(null);
 
-      queryClient.setQueryData(['atividades', id], (old: any) => {
-        if (!old) return old;
-        return old.filter((o: any) => o.id !== atvId);
-      });
+      queryClient.setQueryData<Atividade[]>(QUERY.chat(idLavoura), (old) =>
+        old?.filter((o) => o.id !== atvId) ?? old
+      );
       return { previous };
     },
-    onError: (_err, _atvId, context: any) => {
-      queryClient.setQueryData(['atividades', id], context.previous);
-      toast.error('Erro ao excluir atividade.');
+    onError: (err: Error, _atvId, context: { previous: Atividade[] | undefined } | undefined) => {
+      queryClient.setQueryData(QUERY.chat(idLavoura), context?.previous);
+      toast.error(err.message || 'Erro ao excluir atividade.');
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['atividades', id] });
+    onSettled: async () => {
+      await Promise.all(invalidarAtividades(queryClient, idLavoura));
     }
-  });
-
-  const uploadMutation = useMutation({
-    mutationFn: (formData: FormData) => api.post('/api/v1/upload', formData).then(res => res.json()),
   });
 
   // Scroll Automático
@@ -198,13 +192,12 @@ const ChatPage = () => {
   const handleFilesSelected = async (files: File[]) => {
     const isEdit = !!editingAtv;
 
-    for (const file of files) {
-      const compressed = await compressImage(file);
-      const formData = new FormData();
-      formData.append('file', compressed);
-      const data = await uploadMutation.mutateAsync(formData);
-      
-      if (data.url) {
+    setEnviandoFoto(true);
+    try {
+      for (const file of files) {
+        const compressed = await compressImage(file);
+        const data = await uploadImagem(compressed, { folder: 'atividades' });
+
         if (isEdit && editingAtv) {
           setEditingAtv((prev: any) => ({
             ...prev,
@@ -215,6 +208,10 @@ const ChatPage = () => {
           if (!isEdit) setShowNewModal(true);
         }
       }
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : 'Não foi possível enviar a foto.');
+    } finally {
+      setEnviandoFoto(false);
     }
   };
 
@@ -241,10 +238,11 @@ const ChatPage = () => {
     <Layout 
       title={lavoura?.nome || "Carregando..."} 
       subtitle={isFetching ? "Sincronizando dados..." : (lavoura ? "Toque para ver os detalhes" : undefined)}
-      avatarUrl={lavoura?.foto_perfil}
+      avatarUrl={lavoura?.foto_perfil ?? undefined}
       showBackButton={true} 
       onSearchClick={() => setShowSearch(!showSearch)}
       onTitleClick={() => navigate(`/lavoura/${id}/perfil`)}
+      key={lavoura?.id ?? 'carregando'}
     >
       <div className="flex flex-col h-full bg-[#efeae2] relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.06] bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat"></div>
@@ -347,7 +345,7 @@ const ChatPage = () => {
             onClick={() => setShowMediaOptions(true)} 
             className="p-3 bg-teal-50 text-whatsapp-teal rounded-full hover:bg-teal-100 active:scale-95 transition-all"
           >
-            {uploadMutation.isPending ? <div className="w-5 h-5 border-2 border-whatsapp-teal border-t-transparent animate-spin rounded-full" /> : <ImageIcon size={22} />}
+            {enviandoFoto ? <div className="w-5 h-5 border-2 border-whatsapp-teal border-t-transparent animate-spin rounded-full" /> : <ImageIcon size={22} />}
           </button>
           
           <div className="flex-1 bg-gray-50 border border-gray-100 rounded-3xl px-4 py-3 flex items-center focus-within:ring-2 focus-within:ring-whatsapp-teal/20 transition-all">
@@ -381,7 +379,7 @@ const ChatPage = () => {
               <div className="bg-whatsapp-teal p-6 text-white flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <img 
-                    src={lavoura?.foto_perfil} 
+                    src={lavoura?.foto_perfil ?? undefined} 
                     className="w-10 h-10 rounded-full border-2 border-white/20 object-cover" 
                     alt="" 
                   />
@@ -458,7 +456,7 @@ const ChatPage = () => {
               <div className="p-8 bg-gray-50">
                 <button 
                   onClick={handleCreate} 
-                  disabled={createMutation.isPending || uploadMutation.isPending} 
+                  disabled={createMutation.isPending || enviandoFoto} 
                   className="w-full py-4 bg-whatsapp-teal text-white font-black rounded-2xl shadow-xl shadow-whatsapp-teal/20 hover:bg-whatsapp-teal-dark active:scale-95 transition-all disabled:opacity-50"
                 >
                   {createMutation.isPending ? 'REGISTRANDO...' : 'CONFIRMAR REGISTRO'}

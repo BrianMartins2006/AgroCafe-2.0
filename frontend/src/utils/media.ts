@@ -1,15 +1,10 @@
-const API_URL = import.meta.env.VITE_API_URL || '';
-
 export const getMediaUrl = (path: string | undefined | null) => {
   if (!path) return "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=800&q=80";
-  
+
+  // Só sobram URLs absolutas do Cloudinary agora. O prefixo de caminho relativo
+  // existia para servir `backend/app/static/uploads` pelo Flask e foi removido
+  // junto com o backend — sem VITE_API_URL não há mais host para montar.
   let url = path;
-  if (!path.startsWith('http')) {
-    // Garantir que haja uma barra entre a URL e o caminho
-    const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
-    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-    url = `${baseUrl}${normalizedPath}`;
-  }
 
   // Otimização automática para Cloudinary (se for o caso)
   if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {

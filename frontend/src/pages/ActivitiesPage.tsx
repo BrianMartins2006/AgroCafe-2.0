@@ -1,35 +1,25 @@
 import { useNavigate } from 'react-router-dom';
 import { User, MessageSquare } from 'lucide-react';
 import Layout from '../components/Layout';
-import { api } from '../services/api';
 import { getMediaUrl } from '../utils/media';
 import { useQuery } from '@tanstack/react-query';
-
-interface TipoAtividade {
-  id: number;
-  nome: string;
-  icone: string;
-  cor: string;
-}
-
-interface Atividade {
-  id: number;
-  id_lavoura: number;
-  tipo: TipoAtividade;
-  data: string;
-  descricao: string;
-  responsavel: string;
-  imagens: { id: number; foto_url: string }[];
-}
+import { listarFeed, type Atividade } from '../services/atividades';
+import { QUERY } from '../services/atividadesCache';
 
 const ActivitiesPage = () => {
   const navigate = useNavigate();
 
-  const { data, isLoading: loading } = useQuery({
-    queryKey: ['feed'],
-    queryFn: () => api.get('/api/v1/feed').then(res => res.json())
+  const { data, isLoading: loading } = useQuery<Atividade[]>({
+    queryKey: QUERY.feed(),
+    queryFn: () => listarFeed()
   });
-  const atividades: Atividade[] = Array.isArray(data) ? data : [];
+  const atividades = data ?? [];
+
+  // `tipo` é null no contrato (o FK é NOT NULL no banco, mas a relação pode não
+  // resolver). O ChatPage já tratava com `?.` e fallback; aqui o mesmo fallback
+  // evita quebrar a lista inteira se uma atividade vier sem tipo.
+  const corTipo = (atv: Atividade) => atv.tipo?.cor ?? 'bg-gray-500';
+  const nomeTipo = (atv: Atividade) => atv.tipo?.nome ?? 'Geral';
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -62,8 +52,8 @@ const ActivitiesPage = () => {
                 className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer active:scale-[0.98]"
               >
                 <div className="flex justify-between items-start mb-3">
-                  <div className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full text-white ${atv.tipo.cor}`}>
-                    {atv.tipo.nome}
+                  <div className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full text-white ${corTipo(atv)}`}>
+                    {nomeTipo(atv)}
                   </div>
                   <span className="text-[10px] text-gray-400 font-bold">{formatDate(atv.data)}</span>
                 </div>

@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
 import { Camera, Check, ArrowRight, User, Coffee, Mail, Lock, Eye, EyeOff, MailCheck } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import { uploadImagem } from '../services/cloudinary';
+import { compressImage } from '../utils/imageCompression';
 
 const WelcomePage = () => {
   const navigate = useNavigate();
@@ -25,27 +25,21 @@ const WelcomePage = () => {
     foto_url: ''
   });
 
-  const uploadMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
-      const res = await api.post('/api/v1/upload', formData);
-      if (!res.ok) throw new Error('Falha no upload');
-      return res.json();
-    },
-    onSuccess: (data) => {
-      setForm(prev => ({ ...prev, foto_url: data.url }));
-      toast.success('Foto carregada!');
-    },
-    onError: () => toast.error('Erro ao subir foto'),
-  });
-
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    await uploadMutation.mutateAsync(formData);
-    setUploading(false);
+    try {
+      const comprimido = await compressImage(file);
+      const up = await uploadImagem(comprimido, { folder: 'perfil' });
+      setForm(prev => ({ ...prev, foto_url: up.url }));
+      toast.success('Foto carregada!');
+    } catch (err) {
+      console.error('Falha no upload da foto:', err);
+      toast.error(err instanceof Error ? err.message : 'Erro ao subir foto');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleRegister = async () => {
@@ -63,7 +57,7 @@ const WelcomePage = () => {
 
     setLoading(true);
     try {
-      await cadastrar(form.email, form.senha, form.nome);
+      await cadastrar(form.email, form.senha, form.nome, form.foto_url || undefined);
       toast.success(`Bem-vindo, ${form.nome}!`);
       navigate('/', { replace: true });
     } catch (err) {

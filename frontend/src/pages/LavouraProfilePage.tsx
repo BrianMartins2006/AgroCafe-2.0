@@ -1,42 +1,32 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Calendar, MapPin, Sprout, Image as ImageIcon, ChevronRight, X } from 'lucide-react';
-import { api } from '../services/api';
 import { getMediaUrl } from '../utils/media';
 import { useQuery } from '@tanstack/react-query';
+import { buscarLavoura, type Lavoura } from '../services/lavouras';
+import { listarMidiaLavoura, type ImagemLavoura } from '../services/atividades';
+import { QUERY } from '../services/atividadesCache';
 
-
-interface Lavoura {
-  id: number;
-  nome: string;
-  cultura: string;
-  foto_perfil: string;
-  localizacao?: string;
-  area_hectares?: number;
-  data_inicio?: string;
-}
-
-interface MediaItem {
-  id: number;
-  foto_url: string;
-  data: string;
-  atividade_id: number;
-}
+/**
+ * A galeria e a ficha leem de consultas diferentes, mas as duas derivam da
+ * atividade. `QUERY.midia` usa number porque `id` vem do useParams como string
+ * e o cache trata '2' e 2 como entradas distintas.
+ */
 
 const LavouraProfilePage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  const { data: lavoura, isLoading: loadingLavoura } = useQuery<Lavoura>({
+  const { data: lavoura, isLoading: loadingLavoura } = useQuery<Lavoura | null>({
     queryKey: ['lavouras', id],
-    queryFn: () => api.get(`/api/v1/lavouras/${id}`).then(res => res.json()),
+    queryFn: () => buscarLavoura(Number(id)),
     enabled: !!id
   });
 
-  const { data: media = [], isLoading: loadingMedia } = useQuery<MediaItem[]>({
-    queryKey: ['lavouras', id, 'media'],
-    queryFn: () => api.get(`/api/v1/lavouras/${id}/media`).then(res => res.json()),
+  const { data: media = [], isLoading: loadingMedia } = useQuery<ImagemLavoura[]>({
+    queryKey: QUERY.midia(Number(id)),
+    queryFn: () => listarMidiaLavoura(Number(id)),
     enabled: !!id
   });
 

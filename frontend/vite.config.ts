@@ -69,34 +69,8 @@ export default defineConfig({
               },
             },
           },
-          {
-            urlPattern: /\/api\/v1\/.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 24 horas
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          }
-        ]
+          ]
       }
     })
   ],
-  server: {
-    proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:5000',
-        changeOrigin: true,
-      },
-      '/static': {
-        target: 'http://127.0.0.1:5000',
-        changeOrigin: true,
-      },
-    },
-  },
 })

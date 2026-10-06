@@ -42,6 +42,11 @@ await db.exec(`
   create role anon nologin;
   create role authenticated nologin;
   grant usage on schema public to anon, authenticated;
+  -- Sem isso, uma query que chame auth.uid() direto falha com
+  -- "permission denied for schema auth". As policies escapam porque são
+  -- avaliadas com privilégio do dono da tabela; uma chamada na cláusula WHERE
+  -- é do usuário. No Supabase real as duas roles já têm usage em auth.
+  grant usage on schema auth to anon, authenticated;
 `);
 
 // ---------------------------------------------------------------------------
@@ -77,7 +82,7 @@ const BOB   = '22222222-2222-2222-2222-222222222222';
 // seria duplicar a linha e mascarar o comportamento do trigger.
 await db.query(
   `insert into auth.users (id, email, raw_user_meta_data)
-   values ($1, 'alice@teste.com', '{"nome":"Alice"}'),
+   values ($1, 'alice@teste.com', '{"nome":"Alice","foto_url":"https://res.cloudinary.com/dbmxmbqbi/image/upload/perfil/abc.jpg"}'),
           ($2, 'bob@teste.com',   '{}'),
           ($3, 'semnome@teste.com','{"nome":"   "}')`,
   [ALICE, BOB, '33333333-3333-3333-3333-333333333333']
@@ -97,6 +102,20 @@ perfis.some(p => p.nome === 'bob')
 perfis.some(p => p.nome === 'semnome')
   ? ok('nome em branco no metadata virou prefixo do e-mail')
   : no('trim de nome em branco', JSON.stringify(perfis.map(p => p.nome)));
+
+// Foto do cadastro: sem isso o WelcomePage subia a imagem para o Cloudinary e
+// ela ficava órfã — a URL nunca chegava em public.usuario.
+const comFoto = (await db.query(`select nome, foto_url from public.usuario where nome = 'Alice'`)).rows;
+comFoto[0]?.foto_url?.includes('res.cloudinary.com')
+  ? ok('foto_url veio do metadata no signup')
+  : no('foto do signup', JSON.stringify(comFoto));
+
+// Sem foto no metadata, a coluna tem de ficar nula — não string vazia, que
+// passaria no NOT NULL e renderizaria <img src=""> quebrado na tela.
+const semFoto = (await db.query(`select nome, foto_url from public.usuario where nome = 'bob'`)).rows;
+semFoto[0]?.foto_url === null
+  ? ok('sem foto no metadata, foto_url fica null (não string vazia)')
+  : no('foto vazia', JSON.stringify(semFoto));
 
 // ---------------------------------------------------------------------------
 // 4. Isolamento entre produtores
@@ -167,11 +186,47 @@ console.log('\n== catalogo e ativo ==');
 const tipos = await asUser(ALICE, 'select nome from public.tipo_atividade order by nome');
 tipos.length === 5 ? ok('5 categorias semeadas') : no('semente', `${tipos.length} linhas`);
 
-try {
-  await asUser(ALICE, `delete from public.tipo_atividade where nome = 'Outros'`);
-  const r = await asUser(ALICE, `select count(*)::int as n from public.tipo_atividade where nome = 'Outros'`);
-  r[0].n === 1 ? ok('cliente não apaga categoria (sem política de DELETE)') : no('catalogo gravavel');
-} catch (e) { ok(`escrita no catálogo rejeitada (${e.message.slice(0, 40)})`); }
+// Catálogo gravável desde 20261005120600. O que precisa continuar garantido é
+// a integridade: categoria em uso não pode sumir.
+const criada = await asUser(ALICE, `insert into public.tipo_atividade (nome, icone, cor)
+  values ('Teste CRUD', 'Sprout', 'bg-green-500') returning id`);
+criada.length === 1 ? ok('autenticado cria categoria') : no('insert no catálogo');
+
+const renomeada = await asUser(ALICE, `update public.tipo_atividade set nome = 'Renomeada'
+  where id = ${criada[0].id} returning nome`);
+renomeada[0]?.nome === 'Renomeada' ? ok('autenticado renomeia categoria') : no('update no catálogo');
+
+// Categoria em uso pela atividade da Alice. Descobrir pelo join em vez de
+// assumir nome/id: a semente usa on conflict e o id pode variar.
+const emUso = await asUser(ALICE, `select t.id, t.nome from public.tipo_atividade t
+  join public.atividade a on a.id_tipo_atividade = t.id
+  join public.lavoura l on l.id = a.id_lavoura
+  where l.id_usuario = auth.uid() limit 1`);
+
+// O DELETE tem de ser recusado pelo FK on delete restrict - e a protecao que
+// substitui a politica de somente leitura.
+const naoApagaEmUso = emUso.length > 0
+  ? await asUser(ALICE, `delete from public.tipo_atividade where id = ${emUso[0].id}`).then(() => false).catch(() => true)
+  : false;
+naoApagaEmUso ? ok(`categoria em uso nao pode ser apagada (FK restrict: ${emUso[0]?.nome})`)
+             : no('apagou categoria em uso');
+
+// Categoria sem uso pode sair.
+await asUser(ALICE, `delete from public.tipo_atividade where id = ${criada[0].id}`);
+const sobrou = await asUser(ALICE, `select count(*)::int as n from public.tipo_atividade where id = ${criada[0].id}`);
+sobrou[0].n === 0 ? ok('categoria sem uso pode ser apagada') : no('delete de categoria livre');
+
+// Nome duplicado e barrado por unique(lower(nome)).
+const duplicada = await asUser(ALICE, `insert into public.tipo_atividade (nome) values ('${emUso[0]?.nome}')`)
+  .then(() => false).catch(() => true);
+duplicada ? ok('nome duplicado recusado por unique(lower(nome))') : no('aceitou categoria duplicada');
+
+// Anonimo continua sem escrita, mesmo com as policies de escrita abertas para
+// authenticated.
+const anonEscreve = await anon(`insert into public.tipo_atividade (nome) values ('Anon')`)
+  .then(() => false).catch(() => true);
+anonEscreve ? ok('anon nao cria categoria') : no('anon gravou no catalogo');
+
 
 await db.query('update public.usuario set ativo = false where id = $1', [ALICE]);
 const lavInativa = await asUser(ALICE, 'select nome from public.lavoura');
@@ -197,6 +252,54 @@ semTipo ? ok('atividade com tipo inexistente recusada por FK') : no('FK de tipo_
 
 const cascade = await asUser(ALICE, 'select count(*)::int as n from public.atividade_imagem');
 cascade[0].n === 0 ? ok('cascade lavoura->atividade->imagem íntegro') : no('cascade');
+
+// ---------------------------------------------------------------------------
+// 8. Default de dono (migration 05)
+// ---------------------------------------------------------------------------
+console.log('\n== default de dono ==');
+
+// O ponto é o INSERT *sem* id_usuario: é assim que o frontend vai gravar, sem
+// que o navegador precise saber qual uuid é o do dono.
+const semDono = await asUser(ALICE, `insert into public.lavoura (nome, cultura)
+                                      values ('Sem dono explícito', 'Café')
+                                      returning id_usuario`);
+semDono[0]?.id_usuario === ALICE
+  ? ok('id_usuario preenchido por auth.uid() quando o cliente omite')
+  : no('default de dono', JSON.stringify(semDono[0]));
+
+// E o cliente tentando forçar a lavoura para a conta do vizinho tem de ser
+// recusado: é o with check da política pegando, não o default.
+const forcado = await asUser(ALICE, `insert into public.lavoura (nome, cultura, id_usuario)
+                                     values ('Roubo', 'Café', $1)`).then(() => false).catch(() => true);
+forcado ? ok('INSERT com id_usuario do vizinho recusado') : no('vazamento via id_usuario');
+
+// ---------------------------------------------------------------------------
+// 9. View de última atividade (migration 05)
+// ---------------------------------------------------------------------------
+console.log('\n== view lavoura_com_ultima_atividade ==');
+
+// Isolamento primeiro, e é o teste que importa: sem security_invoker a view roda
+// como dono do schema e as duas contas enxergam as lavouras uma da outra.
+const viewAlice = await asUser(ALICE,
+  `select nome, ultima_atividade_date from public.lavoura_com_ultima_atividade order by nome`);
+const viewBob = await asUser(BOB,
+  `select nome, ultima_atividade_date from public.lavoura_com_ultima_atividade order by nome`);
+
+const aliceVaza = viewAlice.some(l => l.nome === 'Fazenda do Bob');
+const bobVaza = viewBob.some(l => l.nome === 'Sítio da Alice');
+!aliceVaza && !bobVaza
+  ? ok('view não expõe lavouras da outra conta (security_invoker)')
+  : no('view vazou', `Alice viu ${JSON.stringify(viewAlice)} / Bob viu ${JSON.stringify(viewBob)}`);
+
+const comData = viewAlice.find(l => l.nome === 'Sítio da Alice');
+comData?.ultima_atividade_date
+  ? ok('última atividade veio preenchida')
+  : no('ultima_atividade_date', JSON.stringify(comData));
+
+const semData = viewAlice.find(l => l.nome === 'Sem dono explícito');
+semData && semData.ultima_atividade_date === null
+  ? ok('lavoura sem atividade tem data nula, e não some da lista')
+  : no('lavoura sem atividade', JSON.stringify(semData));
 
 // ---------------------------------------------------------------------------
 console.log(`\n${pass} passaram, ${fail} falharam\n`);

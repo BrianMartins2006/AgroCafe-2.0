@@ -4,10 +4,15 @@ import { Sprout, Check, Camera } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import MediaPicker from '../components/MediaPicker';
-import { api } from '../services/api';
+import {
+  criarLavoura,
+  atualizarLavoura,
+  buscarLavoura,
+  type LavouraInput,
+} from '../services/lavouras';
+import { uploadImagem } from '../services/cloudinary';
 import { compressImage } from '../utils/imageCompression';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import toast from 'react-hot-toast';
 
 const NewLavouraPage = () => {
   const { id } = useParams();
@@ -25,11 +30,9 @@ const NewLavouraPage = () => {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: async (payload: any) => {
-      const endpoint = isEdit ? `/api/v1/lavouras/${id}` : '/api/v1/lavouras';
-      const response = await (isEdit ? api.put(endpoint, payload) : api.post(endpoint, payload));
-      if (!response.ok) throw new Error('Falha ao salvar');
-      return response.json();
+    mutationFn: async (payload: LavouraInput) => {
+      if (isEdit) return atualizarLavoura(Number(id), payload);
+      return criarLavoura(payload);
     },
     onMutate: async (newLavoura) => {
       await queryClient.cancelQueries({ queryKey: ['lavouras'] });
@@ -58,22 +61,24 @@ const NewLavouraPage = () => {
   });
 
   useEffect(() => {
-    if (isEdit) {
-      api.get('/api/v1/lavouras')
-        .then(res => res.json())
-        .then(data => {
-          const lavoura = data.find((l: any) => l.id === parseInt(id));
-          if (lavoura) {
-            setNome(lavoura.nome);
-            setCultura(lavoura.cultura);
-            setFotoPerfil(lavoura.foto_perfil);
-            if (lavoura.area_hectares) setArea(lavoura.area_hectares.toString());
-            if (lavoura.localizacao) setLocalizacao(lavoura.localizacao);
-            if (lavoura.data_inicio) setDataInicio(lavoura.data_inicio);
-          }
-        });
-    }
-  }, [id, isEdit, API_URL]);
+    if (!isEdit) return;
+    // Antes: listava todas as lavouras e filtrava no cliente para achar uma.
+    let cancelado = false;
+    buscarLavoura(Number(id))
+      .then(lavoura => {
+        if (cancelado || !lavoura) return;
+        setNome(lavoura.nome);
+        setCultura(lavoura.cultura);
+        setFotoPerfil(lavoura.foto_perfil);
+        if (lavoura.area_hectares) setArea(lavoura.area_hectares.toString());
+        if (lavoura.localizacao) setLocalizacao(lavoura.localizacao);
+        if (lavoura.data_inicio) setDataInicio(lavoura.data_inicio);
+      })
+      .catch((e) => {
+        if (!cancelado) console.error('Erro ao carregar lavoura:', e);
+      });
+    return () => { cancelado = true; };
+  }, [id, isEdit]);
 
   const handleImageSelected = async (files: File[]) => {
     const file = files[0];
@@ -90,14 +95,19 @@ const NewLavouraPage = () => {
     setLoading(true);
     try {
       let finalFotoPerfil = fotoPerfil;
+      let fotoFalhou = false;
 
       if (imgFile) {
-        const formData = new FormData();
-        formData.append('file', imgFile);
-        const uploadRes = await api.post('/api/v1/upload', formData);
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          finalFotoPerfil = uploadData.url;
+        // imgFile já vem comprimido de handleImageSelected — comprimir de novo
+        // só gastaria banda e dégradaria a imagem.
+        try {
+          const up = await uploadImagem(imgFile, { folder: 'lavouras' });
+          finalFotoPerfil = up.url;
+        } catch (e) {
+          // Falha de upload não impede de criar a lavoura: a foto é acessória,
+          // o registro não. Mas o usuário precisa saber que ela não subiu.
+          console.error('Falha no upload da foto:', e);
+          fotoFalhou = true;
         }
       }
 
@@ -107,13 +117,17 @@ const NewLavouraPage = () => {
         foto_perfil: finalFotoPerfil || "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?auto=format&fit=crop&w=100&q=80",
         area_hectares: area ? parseFloat(area) : null,
         localizacao,
-        data_inicio: dataInicio,
-        id_usuario_fk: null
+        data_inicio: dataInicio
       });
 
       navigate('/');
+
+      if (fotoFalhou) {
+        toast('Lavoura salva, mas a foto não subiu.', { icon: '⚠️', duration: 5000 });
+      }
     } catch (err) {
       console.error("Erro ao salvar lavoura:", err);
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar lavoura');
     } finally {
       setLoading(false);
     }

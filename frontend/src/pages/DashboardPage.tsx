@@ -10,32 +10,44 @@ import {
   ArrowUpRight, Calendar, Filter 
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { api } from '../services/api';
+import { listarLavouras } from '../services/lavouras';
+import { listarFeed, type Atividade } from '../services/atividades';
+import { listarFuncionarios } from '../services/funcionarios';
+import { listarMaquinarios } from '../services/maquinarios';
+import { QUERY } from '../services/atividadesCache';
 
 const COLORS = ['#008069', '#25D366', '#34B7F1', '#ECE5DD', '#FFBC2C'];
+
+// O dia precisa ser calculado no fuso do usuário, não em UTC. O código antigo
+// fazia `a.data.startsWith(isoDate)`: com `timestamptz`, uma atividade criada
+// às 22h em São Paulo guardava "2026-10-05T01:00:00Z" e o gráfico contava ela
+// no dia 05 enquanto o usuário ainda estava no dia 04. Formatar a data com
+// getFullYear/getMonth/getDate usa o fuso local e elimina o deslocamento.
+const diaLocal = (data: Date): string =>
+  `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
 
 const DashboardPage = () => {
   const navigate = useNavigate();
 
   const { data: lavouras = [], isLoading: loadLav } = useQuery({
-    queryKey: ['lavouras'],
-    queryFn: () => api.get('/api/v1/lavouras').then(res => res.json())
+    queryKey: QUERY.lavouras(),
+    queryFn: listarLavouras
   });
 
-  const { data: atividadesData, isLoading: loadAtv } = useQuery({
-    queryKey: ['feed'],
-    queryFn: () => api.get('/api/v1/feed').then(res => res.json())
+  const { data: atividadesData, isLoading: loadAtv } = useQuery<Atividade[]>({
+    queryKey: QUERY.feed(),
+    queryFn: () => listarFeed()
   });
-  const atividades: any[] = Array.isArray(atividadesData) ? atividadesData : [];
+  const atividades = useMemo(() => atividadesData ?? [], [atividadesData]);
 
   const { data: funcionarios = [], isLoading: loadFunc } = useQuery({
     queryKey: ['funcionarios'],
-    queryFn: () => api.get('/api/v1/funcionarios').then(res => res.json())
+    queryFn: listarFuncionarios
   });
 
   const { data: maquinarios = [], isLoading: loadMaq } = useQuery({
     queryKey: ['maquinarios'],
-    queryFn: () => api.get('/api/v1/maquinarios').then(res => res.json())
+    queryFn: listarMaquinarios
   });
 
   const loading = loadLav || loadAtv || loadFunc || loadMaq;
@@ -56,12 +68,22 @@ const DashboardPage = () => {
     const last7Days = [...Array(7)].map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      return d.toISOString().split('T')[0];
+      return diaLocal(d);
     }).reverse();
 
+    // Uma vez por dia em vez de 7 × N: o filtro por dia era o gargalo do gráfico.
+    const contagemPorDia = atividades.reduce((acc: Record<string, number>, atv) => {
+      if (!atv.data) return acc;
+      const d = new Date(atv.data);
+      if (Number.isNaN(d.getTime())) return acc;
+      const chave = diaLocal(d);
+      acc[chave] = (acc[chave] || 0) + 1;
+      return acc;
+    }, {});
+
     const lineData = last7Days.map(date => ({
-      date: new Date(date).toLocaleDateString('pt-BR', { weekday: 'short' }),
-      count: atividades.filter((a: any) => a.data && a.data.startsWith(date)).length
+      date: new Date(`${date}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'short' }),
+      count: contagemPorDia[date] || 0
     }));
 
     return {

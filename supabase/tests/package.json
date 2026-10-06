@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node rls.test.mjs"
+    "test": "node rls.test.mjs",
+    "test:data": "node teste-data.mjs",
+    "test:all": "node rls.test.mjs && node teste-data.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0"

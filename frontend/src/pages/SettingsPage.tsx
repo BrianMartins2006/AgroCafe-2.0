@@ -4,30 +4,24 @@ import {
   Users, Truck, ChevronRight, Plus,
   LayoutGrid, Trash2, Edit, X, Check,
   Sprout, Wind, Zap, Droplets, Sun, Hammer,
-  Download, RefreshCw, ZapOff
+  Download
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { buscarPerfil, type UserProfile } from '../services/perfil';
+import {
+  listarTiposAtividade,
+  criarTipoAtividade,
+  atualizarTipoAtividade,
+  deletarTipoAtividade,
+  type TipoAtividade,
+} from '../services/catalogo';
 import { LogOut, User as UserIcon } from 'lucide-react';
 import { getMediaUrl } from '../utils/media';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 
 
-interface UserProfile {
-  id_usuario: number;
-  nome: string;
-  email: string;
-  foto_url?: string;
-}
-
-interface TipoAtividade {
-  id: number;
-  nome: string;
-  icone: string;
-  cor: string;
-}
 
 const COLORS = [
   { name: 'Verde', value: 'bg-whatsapp-green' },
@@ -56,12 +50,12 @@ const SettingsPage = () => {
 
   const { data: profile, isLoading: loadProfile } = useQuery<UserProfile>({
     queryKey: ['perfil'],
-    queryFn: () => api.get('/api/v1/perfil').then(res => res.json())
+    queryFn: buscarPerfil
   });
 
   const { data: tipos = [], isLoading: loadTipos } = useQuery<TipoAtividade[]>({
     queryKey: ['tipos-atividade'],
-    queryFn: () => api.get('/api/v1/tipos-atividade').then(res => res.json())
+    queryFn: listarTiposAtividade
   });
 
   const loading = loadProfile || loadTipos;
@@ -98,24 +92,6 @@ const SettingsPage = () => {
     }
   };
 
-  const handleClearCache = () => {
-    if (window.confirm("Limpar cache e atualizar o app? Isso pode resolver lentidão.")) {
-      // O Supabase guarda a sessão em localStorage, sob chaves "sb-<ref>-auth-token".
-      // Um clear() cego derrubaria o login e mandaria o usuário para /login sem querer.
-      const sessao = Object.keys(localStorage).filter((k) => k.startsWith('sb-'));
-      const preservado = sessao.map((k) => [k, localStorage.getItem(k)] as const);
-
-      localStorage.clear();
-      sessionStorage.clear();
-
-      for (const [chave, valor] of preservado) {
-        if (valor !== null) localStorage.setItem(chave, valor);
-      }
-
-      window.location.reload();
-    }
-  };
-
   const handleLogout = async () => {
     if (window.confirm("Deseja realmente sair da sua conta?")) {
       try {
@@ -139,36 +115,39 @@ const SettingsPage = () => {
   };
 
   const saveMutation = useMutation({
-    mutationFn: (data: any) => {
-      const endpoint = editingTipo ? `/api/v1/tipos-atividade/${editingTipo.id}` : '/api/v1/tipos-atividade';
-      return editingTipo ? api.put(endpoint, data) : api.post(endpoint, data);
+    // Escrita liberada em 20261005120600_tipo_atividade_escrita.sql. A proteção
+    // que importa continua no banco: categoria em uso não pode ser apagada
+    // (FK on delete restrict), e o serviço traduz o 23503 para português.
+    mutationFn: (data: typeof form) => {
+      const payload = { nome: data.nome, icone: data.icone, cor: data.cor };
+      return editingTipo
+        ? atualizarTipoAtividade(editingTipo.id, payload)
+        : criarTipoAtividade(payload);
     },
     onMutate: async (data: any) => {
       await queryClient.cancelQueries({ queryKey: ['tipos-atividade'] });
       const previous = queryClient.getQueryData(['tipos-atividade']);
 
-      const optimisticTipo = {
-        id: editingTipo ? editingTipo.id : Date.now(),
-        ...data
-      };
-
-      setShowModal(false);
-      setEditingTipo(null);
-      setForm({ nome: '', icone: 'Sprout', cor: 'bg-whatsapp-green' });
-
-      queryClient.setQueryData(['tipos-atividade'], (old: any) => {
-        if (!old) return old;
-        if (editingTipo) {
-          return old.map((t: any) => t.id === optimisticTipo.id ? optimisticTipo : t);
-        }
-        return [...old, optimisticTipo];
-      });
+      // Otimista só na edição: na criação o id é gerado pelo banco, e um
+      // Date.now() provisório colidiria com o próximo insert (mesmo problema que
+      // foi corrigido em funcionarios.ts e maquinarios.ts).
+      if (editingTipo) {
+        const otimista = { ...editingTipo, ...data };
+        queryClient.setQueryData(['tipos-atividade'], (old: any) =>
+          old?.map((t: any) => (t.id === editingTipo.id ? otimista : t)) ?? old
+        );
+      }
 
       return { previous };
     },
-    onError: (_err, _data, context: any) => {
-      queryClient.setQueryData(['tipos-atividade'], context.previous);
-      toast.error("Erro ao salvar categoria.");
+    onSuccess: () => {
+      setShowModal(false);
+      setEditingTipo(null);
+      setForm({ nome: '', icone: 'Sprout', cor: 'bg-whatsapp-green' });
+    },
+    onError: (err: Error, _data, context: any) => {
+      queryClient.setQueryData(['tipos-atividade'], context?.previous);
+      toast.error(err.message || 'Erro ao salvar categoria.');
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tipos-atividade'] });
@@ -176,7 +155,7 @@ const SettingsPage = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/v1/tipos-atividade/${id}`),
+    mutationFn: (id: number) => deletarTipoAtividade(id),
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: ['tipos-atividade'] });
       const previous = queryClient.getQueryData(['tipos-atividade']);
@@ -188,9 +167,9 @@ const SettingsPage = () => {
 
       return { previous };
     },
-    onError: (_err, _id, context: any) => {
-      queryClient.setQueryData(['tipos-atividade'], context.previous);
-      toast.error("Erro ao excluir categoria.");
+    onError: (err: Error, _id, context: any) => {
+      queryClient.setQueryData(['tipos-atividade'], context?.previous);
+      toast.error(err.message || 'Erro ao excluir categoria.');
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tipos-atividade'] });
@@ -275,45 +254,23 @@ const SettingsPage = () => {
           </div>
         </div>
         
-        {/* PWA & Performance Section */}
-        <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-gray-50 space-y-4">
-          <h3 className="text-lg font-black text-gray-900 px-2">App & Performance</h3>
-          
-          <div className="grid grid-cols-1 gap-3">
-            <button 
-              onClick={handleInstall}
-              className="flex items-center gap-4 p-4 bg-whatsapp-teal/5 rounded-3xl border border-whatsapp-teal/10 active:scale-95 transition-all"
-            >
-              <div className="w-10 h-10 bg-whatsapp-teal text-white rounded-xl flex items-center justify-center shadow-md">
-                <Download size={20} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-black text-gray-800">Instalar Aplicativo</p>
-                <p className="text-[10px] text-gray-500 font-medium">Tenha o AgroCafé na sua tela de início</p>
-              </div>
-            </button>
-
-            <button 
-              onClick={handleClearCache}
-              className="flex items-center gap-4 p-4 bg-gray-50 rounded-3xl border border-gray-100 active:scale-95 transition-all"
-            >
-              <div className="w-10 h-10 bg-white text-gray-500 rounded-xl flex items-center justify-center shadow-sm border border-gray-100">
-                <RefreshCw size={20} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-black text-gray-800">Limpar Cache e Atualizar</p>
-                <p className="text-[10px] text-gray-500 font-medium">Corrige lentidão e atualiza recursos</p>
-              </div>
-            </button>
+        {/* Instalação do PWA — fica ao lado do perfil, que é onde se espera
+            encontrar "instalar o app". Antes era uma seção "App & Performance"
+            com limpeza de cache e uma dica de velocidade que não é mais
+            verdadeira: o Supabase pago não hiberna. */}
+        <button
+          onClick={handleInstall}
+          className="w-full flex items-center gap-4 p-5 bg-whatsapp-teal rounded-[2.5rem] shadow-lg shadow-whatsapp-teal/20 active:scale-[0.98] transition-all text-left"
+        >
+          <div className="w-12 h-12 bg-white/20 text-white rounded-2xl flex items-center justify-center shrink-0">
+            <Download size={24} />
           </div>
-
-          <div className="p-4 bg-orange-50 rounded-2xl flex gap-3">
-            <ZapOff size={24} className="text-orange-500 shrink-0" />
-            <p className="text-[10px] text-orange-700 font-medium leading-relaxed">
-              <b>Dica de Velocidade:</b> Por estarmos no plano gratuito, o servidor "dorme" após 15min. O primeiro acesso pode demorar 50s, mas depois disso ele fica rápido!
-            </p>
+          <div className="flex-1">
+            <p className="text-sm font-black text-white">Instalar Aplicativo</p>
+            <p className="text-[11px] text-white/80 font-medium">Tenha o AgroCafé na sua tela de início</p>
           </div>
-        </div>
+          <ChevronRight size={20} className="text-white/60 shrink-0" />
+        </button>
 
         {/* Categories List */}
         <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-gray-50">

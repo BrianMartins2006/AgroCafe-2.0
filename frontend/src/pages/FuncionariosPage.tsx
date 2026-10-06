@@ -5,23 +5,21 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import {
+  listarFuncionarios,
+  criarFuncionario,
+  atualizarFuncionario,
+  deletarFuncionario,
+  type Funcionario,
+} from '../services/funcionarios';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 
-
-interface Funcionario {
-  id_funcionario: number;
-  nome: string;
-  cargo: string;
-  salario_hora: number;
-  contato: string;
-}
 
 const FuncionariosPage = () => {
   const queryClient = useQueryClient();
   const { data: funcionarios = [], isLoading: loading } = useQuery<Funcionario[]>({
     queryKey: ['funcionarios'],
-    queryFn: () => api.get('/api/v1/funcionarios').then(res => res.json())
+    queryFn: listarFuncionarios
   });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -35,37 +33,27 @@ const FuncionariosPage = () => {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data: any) => {
-      const endpoint = editingFunc ? `/api/v1/funcionarios/${editingFunc.id_funcionario}` : '/api/v1/funcionarios';
-      return editingFunc ? api.put(endpoint, data) : api.post(endpoint, data);
-    },
-    onMutate: async (data: any) => {
-      await queryClient.cancelQueries({ queryKey: ['funcionarios'] });
-      const previous = queryClient.getQueryData(['funcionarios']);
-
-      const optimisticFunc = {
-        id_funcionario: editingFunc ? editingFunc.id_funcionario : Date.now(),
-        ...data,
-        salario_hora: Number(data.salario_hora)
+    mutationFn: (data: typeof form) => {
+      const payload = {
+        nome: data.nome,
+        cargo: data.cargo,
+        salario_hora: Number(data.salario_hora),
+        contato: data.contato,
       };
-
+      return editingFunc
+        ? atualizarFuncionario(editingFunc.id_funcionario, payload)
+        : criarFuncionario(payload);
+    },
+    // O Flask devolvia o registro salvo e a tela recebia o id real do banco. Com
+    // o insert otimista o id era Date.now(), que colidiria com o próximo
+    // employee criado — então agora a mutação espera o insert e usa o id real.
+    onSuccess: () => {
       setIsModalOpen(false);
       setEditingFunc(null);
       setForm({ nome: '', cargo: '', salario_hora: '', contato: '' });
-
-      queryClient.setQueryData(['funcionarios'], (old: any) => {
-        if (!old) return old;
-        if (editingFunc) {
-          return old.map((f: any) => f.id_funcionario === optimisticFunc.id_funcionario ? optimisticFunc : f);
-        }
-        return [...old, optimisticFunc];
-      });
-
-      return { previous };
     },
-    onError: (_err, _data, context: any) => {
-      queryClient.setQueryData(['funcionarios'], context.previous);
-      toast.error("Erro ao salvar funcionário.");
+    onError: (err: Error) => {
+      toast.error(err.message || "Erro ao salvar funcionário.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['funcionarios'] });
@@ -73,21 +61,20 @@ const FuncionariosPage = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/v1/funcionarios/${id}`),
+    mutationFn: (id: number) => deletarFuncionario(id),
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: ['funcionarios'] });
-      const previous = queryClient.getQueryData(['funcionarios']);
+      const previous = queryClient.getQueryData<Funcionario[]>(['funcionarios']);
 
-      queryClient.setQueryData(['funcionarios'], (old: any) => {
-        if (!old) return old;
-        return old.filter((f: any) => f.id_funcionario !== id);
-      });
+      queryClient.setQueryData<Funcionario[]>(['funcionarios'], (old) =>
+        old?.filter((f) => f.id_funcionario !== id) ?? old
+      );
 
       return { previous };
     },
-    onError: (_err, _id, context: any) => {
-      queryClient.setQueryData(['funcionarios'], context.previous);
-      toast.error("Erro ao excluir.");
+    onError: (err: Error, _id, context: { previous: Funcionario[] | undefined } | undefined) => {
+      queryClient.setQueryData(['funcionarios'], context?.previous);
+      toast.error(err.message || "Erro ao excluir.");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['funcionarios'] });
@@ -128,9 +115,9 @@ const FuncionariosPage = () => {
     setEditingFunc(func);
     setForm({ 
       nome: func.nome, 
-      cargo: func.cargo, 
+      cargo: func.cargo ?? '', 
       salario_hora: func.salario_hora.toString(), 
-      contato: func.contato 
+      contato: func.contato ?? '' 
     });
     setIsModalOpen(true);
   };

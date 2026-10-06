@@ -9,7 +9,7 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   entrar: (email: string, senha: string) => Promise<void>;
-  cadastrar: (email: string, senha: string, nome: string) => Promise<void>;
+  cadastrar: (email: string, senha: string, nome: string, foto_url?: string) => Promise<void>;
   sair: () => Promise<void>;
   pedirReset: (email: string) => Promise<void>;
 };
@@ -63,11 +63,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw new Error(error.message);
   };
 
-  const cadastrar = async (email: string, senha: string, nome: string) => {
+  const cadastrar = async (email: string, senha: string, nome: string, foto_url?: string) => {
+    // `foto_url` vai nos metadados porque o trigger handle_novo_usuario roda no
+    // instante em que a linha de auth.users é criada — ou seja, ANTES de o
+    // e-mail ser confirmado. Sem "Confirm email" no Auth dá para corrigir com
+    // atualizarPerfil() depois do login; com a confirmação ativa não existe
+    // sessão nenhuma nesse momento, e a única forma de gravar a foto é pelo
+    // metadata. Como a foto já foi subida para o Cloudinary antes do signUp,
+    // a URL já está pronta e é só transported.
     const { data, error } = await supabase.auth.signUp({
       email,
       password: senha,
-      options: { data: { nome } },
+      options: { data: { nome, foto_url: foto_url || null } },
     });
     if (error) throw new Error(error.message);
 

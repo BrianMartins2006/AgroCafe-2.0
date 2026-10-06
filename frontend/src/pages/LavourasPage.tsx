@@ -4,7 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Sprout, MessageSquarePlus, Settings, Search, Trash, Pin, PinOff, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import Skeleton from '../components/Skeleton';
-import { api } from '../services/api';
+import {
+  listarLavouras,
+  deletarLavoura,
+  alternarPin,
+  type Lavoura,
+} from '../services/lavouras';
 import { getMediaUrl } from '../utils/media';
 
 
@@ -19,16 +24,6 @@ const MoreVertical = ({ size, className }: { size: number; className?: string })
   </svg>
 );
 
-interface Lavoura {
-  id: number;
-  nome: string;
-  cultura: string;
-  ultimaAtividade?: string;
-  data?: string;
-  foto_perfil: string;
-  is_pinned: boolean;
-  ultima_atividade_date?: string | null;
-}
 
 
 const LavourasPage = () => {
@@ -43,12 +38,12 @@ const LavourasPage = () => {
   // Busca de dados com React Query (Persistence habilitada no App.tsx)
   const { data: lavouras = [], isLoading, isFetching } = useQuery<Lavoura[]>({
     queryKey: ['lavouras'],
-    queryFn: () => api.get('/api/v1/lavouras').then(res => res.json()),
+    queryFn: listarLavouras,
   });
 
   // Mutação para Deletar
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/v1/lavouras/${id}`),
+    mutationFn: deletarLavoura,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lavouras'] });
       setShowDeleteConfirm(false);
@@ -58,7 +53,7 @@ const LavourasPage = () => {
 
   // Mutação para Toggle Pin
   const pinMutation = useMutation({
-    mutationFn: (id: number) => api.patch(`/api/v1/lavouras/${id}/pin`, {}),
+    mutationFn: ({ id, isPinned }: { id: number; isPinned: boolean }) => alternarPin(id, isPinned),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lavouras'] });
       setSelectedLavoura(null);
@@ -85,7 +80,7 @@ const LavourasPage = () => {
 
   const handleTogglePin = (e: React.MouseEvent, lavoura: Lavoura) => {
     e.stopPropagation();
-    pinMutation.mutate(lavoura.id);
+    pinMutation.mutate({ id: lavoura.id, isPinned: !lavoura.is_pinned });
   };
 
   // Lógica de Ordenação Híbrida (Igual ao WhatsApp)
@@ -193,14 +188,16 @@ const LavourasPage = () => {
                     {lavoura.is_pinned && <Pin size={12} className="text-whatsapp-teal fill-whatsapp-teal -rotate-45" />}
                   </div>
                   <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
-                    {lavoura.ultima_atividade_date 
-                      ? new Date(lavoura.ultima_atividade_date).toLocaleDateString() 
-                      : (lavoura.data || "Hoje")}
+                    {lavoura.ultima_atividade_date
+                      ? new Date(lavoura.ultima_atividade_date).toLocaleDateString()
+                      : lavoura.data_inicio
+                        ? new Date(`${lavoura.data_inicio}T12:00:00`).toLocaleDateString()
+                        : 'Sem registro'}
                   </span>
                 </div>
                 <p className="text-sm text-gray-500 truncate mt-0.5 flex items-center gap-1">
                   <Sprout size={14} className="text-whatsapp-green" />
-                  {lavoura.cultura} {lavoura.ultimaAtividade ? `- ${lavoura.ultimaAtividade}` : ""}
+                  {lavoura.cultura}
                 </p>
               </div>
 

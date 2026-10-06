@@ -2,22 +2,17 @@ import { useState, useEffect } from 'react';
 import { User, Mail, Lock, Camera, Check, Eye, EyeOff, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import MediaPicker from '../components/MediaPicker';
-import { api } from '../services/api';
+import { buscarPerfil, atualizarPerfil, type UserProfile } from '../services/perfil';
+import { uploadImagem } from '../services/cloudinary';
 import { getMediaUrl } from '../utils/media';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-
-interface UserProfile {
-  id_usuario: number;
-  nome: string;
-  email: string;
-  foto_url?: string;
-}
+import toast from 'react-hot-toast';
 
 const ProfilePage = () => {
   const queryClient = useQueryClient();
   const { data: profile, isLoading: loading } = useQuery<UserProfile>({
     queryKey: ['perfil'],
-    queryFn: () => api.get('/api/v1/perfil').then(res => res.json())
+    queryFn: buscarPerfil
   });
 
   const [saving, setSaving] = useState(false);
@@ -46,25 +41,16 @@ const ProfilePage = () => {
     const file = files[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
       setSaving(true);
-      const res = await api.post('/api/v1/upload', formData);
-
-      if (res.ok) {
-        const data = await res.json();
-        const updateRes = await api.put('/api/v1/perfil', { ...form, foto_url: data.url });
-
-        if (updateRes.ok) {
-          queryClient.invalidateQueries({ queryKey: ['perfil'] });
-          setSuccess(true);
-          setTimeout(() => setSuccess(false), 3000);
-        }
-      }
+      const up = await uploadImagem(file, { folder: 'perfil' });
+      await atualizarPerfil({ nome: form.nome, foto_url: up.url });
+      queryClient.invalidateQueries({ queryKey: ['perfil'] });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       console.error("Erro ao subir foto:", err);
+      toast.error(err instanceof Error ? err.message : 'Erro ao subir foto');
     } finally {
       setSaving(false);
     }
@@ -76,15 +62,13 @@ const ProfilePage = () => {
     setSuccess(false);
     
     try {
-      const res = await api.put('/api/v1/perfil', { ...form, foto_url: profile?.foto_url });
-      
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ['perfil'] });
-        setSuccess(true);
-        setTimeout(() => setSuccess(false), 3000);
-      }
+      await atualizarPerfil({ nome: form.nome, foto_url: profile?.foto_url ?? null });
+      queryClient.invalidateQueries({ queryKey: ['perfil'] });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       console.error("Erro ao salvar perfil:", err);
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar perfil');
     } finally {
       setSaving(false);
     }
