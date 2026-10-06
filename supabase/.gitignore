@@ -1,0 +1,12 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local
+
+# dependências do harness de teste de RLS (PGlite)
+tests/node_modules/
+tests/package-lock.json

@@ -4,7 +4,7 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 let isWakingUpToastShown = false;
 
-export const apiFetch = async (endpoint: string, options: RequestInit = {}, retries = 5): Promise<Response> => {
+export const apiFetch = async (endpoint: string, options: RequestInit = {}, retries = 3): Promise<Response> => {
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
   
   // Garantir que as credenciais (cookies) sejam enviadas
@@ -29,7 +29,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}, retr
   // Se demorar mais de 3 segundos, assume que o servidor do Render está acordando
   const timeoutId = setTimeout(() => {
     if (!isWakingUpToastShown) {
-      toastId = toast.loading('☕ Acordando o servidor... Isso pode levar até 50 segundos na primeira vez.', {
+      toastId = toast.loading('☕ Café sendo passado... Servidor acordando (até 50s na primeira vez).', {
         duration: 60000,
         style: {
           background: '#fff3cd',
@@ -71,10 +71,12 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}, retr
   } catch (error) {
     clearTimeout(timeoutId);
     
-    // Se ainda houver retries, espera 5 segundos e tenta de novo
+    // Se ainda houver retries, espera com timeout progressivo e tenta de novo
     if (retries > 0) {
-      console.log(`Falha na conexão, o servidor pode estar acordando. Tentando novamente em 5s... (${retries} retries restantes)`);
-      await new Promise(res => setTimeout(res, 5000));
+      const delays = [5000, 8000, 12000];
+      const delay = delays[delays.length - retries] || 10000;
+      console.log(`Falha na conexão, o servidor pode estar acordando. Tentando novamente em ${delay/1000}s... (${retries} retries restantes)`);
+      await new Promise(res => setTimeout(res, delay));
       return apiFetch(endpoint, options, retries - 1);
     }
     

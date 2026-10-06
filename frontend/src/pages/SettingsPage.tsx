@@ -12,6 +12,7 @@ import { api } from '../services/api';
 import { LogOut, User as UserIcon } from 'lucide-react';
 import { getMediaUrl } from '../utils/media';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+import { useAuth } from '../hooks/useAuth';
 
 
 interface UserProfile {
@@ -50,6 +51,7 @@ const ICONS_MAP: any = {
 
 const SettingsPage = () => {
   const navigate = useNavigate();
+  const { sair } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: profile, isLoading: loadProfile } = useQuery<UserProfile>({
@@ -98,8 +100,18 @@ const SettingsPage = () => {
 
   const handleClearCache = () => {
     if (window.confirm("Limpar cache e atualizar o app? Isso pode resolver lentidão.")) {
+      // O Supabase guarda a sessão em localStorage, sob chaves "sb-<ref>-auth-token".
+      // Um clear() cego derrubaria o login e mandaria o usuário para /login sem querer.
+      const sessao = Object.keys(localStorage).filter((k) => k.startsWith('sb-'));
+      const preservado = sessao.map((k) => [k, localStorage.getItem(k)] as const);
+
       localStorage.clear();
       sessionStorage.clear();
+
+      for (const [chave, valor] of preservado) {
+        if (valor !== null) localStorage.setItem(chave, valor);
+      }
+
       window.location.reload();
     }
   };
@@ -107,13 +119,11 @@ const SettingsPage = () => {
   const handleLogout = async () => {
     if (window.confirm("Deseja realmente sair da sua conta?")) {
       try {
-        await api.post('/api/v1/auth/logout', {});
-        localStorage.removeItem('isOnboarded'); 
-        window.location.href = '/login';
+        await sair();
       } catch (err) {
         console.error("Erro ao sair:", err);
-        window.location.href = '/login';
       }
+      navigate('/login', { replace: true });
     }
   };
 

@@ -25,10 +25,11 @@ interface Atividade {
 const ActivitiesPage = () => {
   const navigate = useNavigate();
 
-  const { data: atividades = [], isLoading: loading } = useQuery<Atividade[]>({
+  const { data, isLoading: loading } = useQuery({
     queryKey: ['feed'],
     queryFn: () => api.get('/api/v1/feed').then(res => res.json())
   });
+  const atividades: Atividade[] = Array.isArray(data) ? data : [];
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);

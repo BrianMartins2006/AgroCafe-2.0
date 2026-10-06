@@ -20,7 +20,7 @@ class Atividade(db.Model):
             'id': self.id,
             'id_lavoura': self.id_lavoura_fk,
             'tipo': self.tipo.to_dict() if self.tipo else None,
-            'data': self.data.isoformat() + 'Z',
+            'data': self.data.isoformat() + 'Z' if self.data else None,
             'descricao': self.descricao,
             'responsavel': self.responsavel,
             'imagens': [img.to_dict() for img in self.imagens]

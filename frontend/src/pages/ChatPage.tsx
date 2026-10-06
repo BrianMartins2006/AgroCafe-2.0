@@ -76,11 +76,12 @@ const ChatPage = () => {
     queryFn: () => api.get('/api/v1/funcionarios').then(res => res.json())
   });
 
-  const { data: atividades = [], isLoading, isFetching } = useQuery({
+  const { data: atividadesData, isLoading, isFetching } = useQuery({
     queryKey: ['atividades', id],
     queryFn: () => api.get(`/api/v1/lavouras/${id}/atividades`).then(res => res.json()),
     enabled: !!id
   });
+  const atividades: any[] = Array.isArray(atividadesData) ? atividadesData : [];
 
   // Efeito para definir a categoria padrão assim que carregar
   useEffect(() => {
@@ -303,9 +304,9 @@ const ChatPage = () => {
               <div className="bg-white rounded-xl rounded-tl-none p-3 shadow-sm max-w-[90%] relative self-start border-l-4 border-l-whatsapp-teal">
                 <div className="flex justify-between items-center gap-4 mb-0.5">
                   <span className="text-[10px] font-black text-whatsapp-teal uppercase tracking-tight">{atv.responsavel}</span>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => setEditingAtv(atv)} className="p-1 text-gray-300 hover:text-whatsapp-teal"><Edit size={14} /></button>
-                    <button onClick={() => setDeletingId(atv.id)} className="p-1 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                  <div className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
+                    <button onClick={() => setEditingAtv(atv)} className="p-1 text-gray-500 hover:text-whatsapp-teal"><Edit size={14} /></button>
+                    <button onClick={() => setDeletingId(atv.id)} className="p-1 text-gray-500 hover:text-red-500"><Trash2 size={14} /></button>
                   </div>
                 </div>
                 <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md mb-2 shadow-sm ${atv.tipo?.cor || 'bg-gray-500'}`}>
@@ -392,17 +393,20 @@ const ChatPage = () => {
                 <button onClick={() => setShowNewModal(false)} className="p-2 hover:bg-white/10 rounded-full transition-all"><X size={20} /></button>
               </div>
               <div className="p-8 pb-10 space-y-6 overflow-y-auto no-scrollbar relative">
-                <div className="grid grid-cols-3 gap-2">
-                  {newAtvForm.fotos.map((url, idx) => (
-                    <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm">
-                      <img src={url} className="w-full h-full object-cover" />
-                      <button onClick={() => setNewAtvForm({...newAtvForm, fotos: newAtvForm.fotos.filter((_, i) => i !== idx)})} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md"><X size={10} /></button>
-                    </div>
-                  ))}
-                  <button onClick={() => setShowMediaOptions(true)} className="aspect-square rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal transition-all"><Plus size={24} /></button>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase mb-2 block ml-2">Descrição</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {newAtvForm.fotos.map((url, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm">
+                        <img src={url} className="w-full h-full object-cover" />
+                        <button onClick={() => setNewAtvForm({...newAtvForm, fotos: newAtvForm.fotos.filter((_, i) => i !== idx)})} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md"><X size={10} /></button>
+                      </div>
+                    ))}
+                    <button onClick={() => setShowMediaOptions(true)} className="aspect-square rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal transition-all flex-col gap-1">
+                      <Plus size={20} />
+                      <span className="text-[7px] font-black uppercase">Foto</span>
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase mb-2 block ml-2">Descrição</label>
                   <textarea 
                     value={newAtvForm.descricao} 
                     onChange={e => setNewAtvForm({...newAtvForm, descricao: e.target.value})} 
@@ -572,6 +576,14 @@ const ChatPage = () => {
              </div>
           </div>
         )}
+
+        {/* FAB - Nova Atividade */}
+        <button
+          onClick={() => setShowNewModal(true)}
+          className="fixed bottom-20 right-4 z-50 w-14 h-14 bg-whatsapp-green text-white rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-90 hover:-translate-y-1 hover:shadow-whatsapp-green/40 pointer-events-auto"
+        >
+          <Plus size={28} />
+        </button>
 
         {/* MODAL: DELETE */}
         {deletingId && (

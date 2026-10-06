@@ -1,13 +1,16 @@
 import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Camera, Check, ArrowRight, User, Coffee, Mail, Lock, ShieldQuestion, Eye, EyeOff } from 'lucide-react';
+import { Camera, Check, ArrowRight, User, Coffee, Mail, Lock, Eye, EyeOff, MailCheck } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { api } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 const WelcomePage = () => {
   const navigate = useNavigate();
+  const { cadastrar } = useAuth();
   const [step, setStep] = useState(1);
+  const [confirmarEmail, setConfirmarEmail] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -19,8 +22,6 @@ const WelcomePage = () => {
     email: '',
     senha: '',
     confirmarSenha: '',
-    pergunta_seguranca: '',
-    resposta_seguranca: '',
     foto_url: ''
   });
 
@@ -48,7 +49,7 @@ const WelcomePage = () => {
   };
 
   const handleRegister = async () => {
-    if (!form.nome || !form.email || !form.senha || !form.confirmarSenha || !form.pergunta_seguranca || !form.resposta_seguranca) {
+    if (!form.nome || !form.email || !form.senha || !form.confirmarSenha) {
       return toast.error('Preencha todos os campos obrigatórios');
     }
 
@@ -62,21 +63,15 @@ const WelcomePage = () => {
 
     setLoading(true);
     try {
-      const res = await api.post('/api/v1/auth/register', form);
-      const data = await res.json();
-
-      if (res.ok) {
-        localStorage.setItem('onboarding_complete', 'true');
-        localStorage.setItem('user_name', data.nome);
-        localStorage.setItem('user_photo', data.foto_url || '');
-        toast.success(`Bem-vindo, ${data.nome}!`);
-        window.dispatchEvent(new CustomEvent('app:login'));
-        navigate('/');
-      } else {
-        toast.error(data.erro || 'Erro ao realizar cadastro');
-      }
+      await cadastrar(form.email, form.senha, form.nome);
+      toast.success(`Bem-vindo, ${form.nome}!`);
+      navigate('/', { replace: true });
     } catch (err) {
-      toast.error('Erro de conexão com o servidor');
+      if (err instanceof Error && err.message === 'CONFIRMACAO_NECESSARIA') {
+        setConfirmarEmail(true);
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Erro ao realizar cadastro');
     } finally {
       setLoading(false);
     }
@@ -96,7 +91,24 @@ const WelcomePage = () => {
 
       <div className="relative z-10 w-full max-w-md px-8 text-center text-white flex flex-col h-full py-12">
         
-        {step === 1 ? (
+        {confirmarEmail ? (
+          <div className="flex-1 flex flex-col items-center justify-center animate-in zoom-in duration-500">
+            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-8 shadow-2xl">
+              <MailCheck size={48} className="text-whatsapp-teal" />
+            </div>
+            <h2 className="text-2xl font-black mb-4">Confirme seu e-mail</h2>
+            <p className="text-white/70 mb-10 font-medium leading-relaxed max-w-xs">
+              Enviamos um link de confirmação para <span className="font-black">{form.email}</span>.
+              Abra o e-mail para ativar sua conta e depois faça o login.
+            </p>
+            <Link
+              to="/login"
+              className="w-full bg-white text-whatsapp-teal py-5 rounded-[2rem] font-black text-xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3"
+            >
+              IR PARA O LOGIN <ArrowRight size={24} />
+            </Link>
+          </div>
+        ) : step === 1 ? (
           <div className="flex-1 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-700">
             <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-8 shadow-2xl">
               <Coffee size={48} className="text-whatsapp-teal" />
@@ -224,31 +236,6 @@ const WelcomePage = () => {
                     {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-widest text-white/60 text-left block ml-4">Crie sua Pergunta de Segurança</label>
-                <div className="relative">
-                  <ShieldQuestion size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40" />
-                  <input 
-                    type="text" 
-                    value={form.pergunta_seguranca}
-                    onChange={(e) => setForm({...form, pergunta_seguranca: e.target.value})}
-                    placeholder="Ex: Qual o nome do meu primeiro trator?"
-                    className="w-full bg-white/10 border-2 border-white/20 rounded-2xl py-3.5 pl-12 pr-6 text-sm font-bold outline-none focus:border-white focus:bg-white/20 transition-all placeholder:text-white/20"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase tracking-widest text-white/60 text-left block ml-4">Sua Resposta</label>
-                <input 
-                  type="text" 
-                  value={form.resposta_seguranca}
-                  onChange={(e) => setForm({...form, resposta_seguranca: e.target.value})}
-                  placeholder="Resposta para recuperar senha"
-                  className="w-full bg-white/10 border-2 border-white/20 rounded-2xl py-3.5 px-6 text-lg font-bold outline-none focus:border-white focus:bg-white/20 transition-all placeholder:text-white/20"
-                />
               </div>
             </div>
 

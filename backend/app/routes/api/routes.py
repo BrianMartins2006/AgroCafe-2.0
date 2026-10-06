@@ -367,7 +367,6 @@ def delete_atividade(id):
     return '', 204
 
 @api.route('/upload', methods=['POST'])
-@login_required
 def upload_file():
     if 'file' not in request.files:
         return jsonify({"erro": "Nenhum arquivo enviado"}), 400

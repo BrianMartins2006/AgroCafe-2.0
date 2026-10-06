@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, Coffee, Check, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { api } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const { entrar } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({
@@ -21,21 +22,16 @@ const LoginPage = () => {
 
     setLoading(true);
     try {
-      const res = await api.post('/api/v1/auth/login', form);
-      const data = await res.json();
-
-      if (res.ok) {
-        localStorage.setItem('onboarding_complete', 'true');
-        localStorage.setItem('user_name', data.nome);
-        localStorage.setItem('user_photo', data.foto_url || '');
-        toast.success(`Bem-vindo de volta, ${data.nome}!`);
-        window.dispatchEvent(new CustomEvent('app:login'));
-        navigate('/');
-      } else {
-        toast.error(data.erro || 'E-mail ou senha incorretos');
-      }
+      await entrar(form.email, form.senha);
+      toast.success('Bem-vindo de volta!');
+      navigate('/', { replace: true });
     } catch (err) {
-      toast.error('Erro de conexão com o servidor');
+      const mensagem = err instanceof Error ? err.message : 'E-mail ou senha incorretos';
+      if (mensagem.toLowerCase().includes('invalid login')) {
+        toast.error('E-mail ou senha incorretos');
+      } else {
+        toast.error(mensagem);
+      }
     } finally {
       setLoading(false);
     }
