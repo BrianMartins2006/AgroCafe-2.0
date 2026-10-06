@@ -34,8 +34,3 @@ Thumbs.db
 # 5. Arquivos de IDEs Comuns (VS Code)
 # ------------------------------------
 .vscode/
-
-# ------------------------------------
-# 6. Uploads e Arquivos Estáticos
-# ------------------------------------
-backend/app/static/uploads/atividades/*

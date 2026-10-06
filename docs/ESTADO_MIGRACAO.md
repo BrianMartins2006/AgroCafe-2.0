@@ -246,7 +246,12 @@ produção, não de desenvolvimento.
 - [ ] Separar `useAuth` para silenciar o warning de `react-refresh`.
 - [ ] Remover os `console.log` de `utils/performance.ts` (linhas 11-12) — ruído
       no console de produção.
-- [ ] Remover o backend Flask quando o frontend estiver validado em produção.
+- [x] Backend Flask removido em 06/10 (commit a ser confirmado). `backend/`
+      inteiro saiu: 56 arquivos versionados, API, modelos, templates e os
+      5 JPEGs de teste. Isso também tira do HEAD a rota `/upload` sem
+      `@login_required` (armadilha 7) — mas o histórico do GitHub continua
+      com ela, e o serviço no Render, se ainda estiver no ar, não para
+      sozinho.
 - [ ] Corrigir/atualizar `docs/PLANO_MIGRACAO.md` (remover ETL).
 
 ### Fase F — Deploy
@@ -375,21 +380,32 @@ git add frontend/package.json frontend/package-lock.json \
 git diff --cached --stat   # conferir antes de commitar
 ```
 
-### Backend: decisão pendente com o usuário
-A remoção de `backend/` foi adiada por decisão explícita — o usuário vai tratar
-disso depois. Registrando o motivo de não ser feito agora, para ninguém
-"acelerar" isso numa sessão futura sem ler:
+### Backend Flask: REMOVIDO em 06/10
+`backend/` foi apagado do repositório. Não há mais Python no projeto.
 
-- O frontend **está validado no navegador** e não tem mais nenhuma dependência
-  do Flask, então o motivo original já não vale. O que ainda segura a remoção é
-  outro: o **Render**. A aplicação em produção (Vercel) aponta `VITE_API_URL`
-  para o Flask, e as telas de produção ainda são o build antigo. Apagar o backend
-  agora quebraria a produção em uso.
-- Ordem segura quando for remover: (1) fazer o deploy do frontend novo, (2)
-  confirmar que a produção roda sem o Flask, (3) só então derrubar o serviço no
-  Render, (4) por fim apagar `backend/` do repositório.
-- `backend/venv/` (146M) e `backend/app/static/uploads/` (12M) são irrelevantes
-  para o diff — não é preciso apagar nada para ter um commit limpo.
+- 56 arquivos versionados saíram: API Flask, modelos SQLAlchemy/MySQL, templates
+  HTML e os 5 JPEGs de teste em `app/static/uploads/`.
+- Nenhuma referência a `backend/` sobrou no frontend. Só comentários em
+  `utils/media.ts` e `services/cloudinary.ts` explicando de onde veio o
+  formato — inofensivos e úteis.
+- As linhas `venv/`, `.venv/` e `backend/app/static/uploads/atividades/*` do
+  `.gitignore` saíram por só servirem ao Flask. `venv/` foi mantido: inofensivo
+  e protege contra ambiente virtual criado na raiz por engano.
+- O `backend/.env` local (credenciais MySQL, `SECRET_KEY`, `CLOUDINARY_URL`)
+  foi junto. Essas credenciais de MySQL estão-mortas desde a migração.
+
+**O furo do `/upload` continua no histórico.** A rota sem `@login_required` está
+em `7f74a12`. Remover o diretório tira o código do HEAD, não apaga o commit do
+GitHub. Se o Render ainda estiver no ar, o serviço continua rodando a versão
+antiga — derrubar lá é passo separado.
+
+**Ordem do desligamento completo:**
+1. Deploy do frontend novo na Vercel (a produção ainda é o build antigo, que
+   aponta `VITE_API_URL` para o Flask).
+2. Confirmar que a produção roda sem o Flask.
+3. Derrubar o serviço no Render.
+4. Rotacionar a `SECRET_KEY` e as credenciais MySQL se algum backup antigo
+   ainda as tiver.
 
 ---
 
