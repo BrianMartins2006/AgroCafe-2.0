@@ -230,7 +230,6 @@ const AnotacoesPage = () => {
             </button>
           </div>
           <p className="text-sm text-gray-400 font-medium">
-            Lembretes, ideias e recados com fotos — solto do resto do sistema.
           </p>
         </div>
 
@@ -318,7 +317,7 @@ const AnotacoesPage = () => {
                 )}
 
                 {anotacao.imagens.length > 0 && (
-                  <div className="flex gap-2 mt-4 flex-wrap">
+                  <div className="flex gap-2 mt-4 overflow-x-auto no-scrollbar">
                     {anotacao.imagens.slice(0, 3).map((img) => (
                       <button
                         key={img.id}
@@ -328,18 +327,20 @@ const AnotacoesPage = () => {
                             anotacao.imagens.findIndex((i) => i.id === img.id)
                           )
                         }
-                        className="active:scale-95 transition-all"
+                        className="shrink-0 active:scale-95 transition-all"
                         aria-label="Ampliar foto"
                       >
+                        {/* h-24 com largura natural: sem moldura quadrada, a foto
+                            mantém a proporção original em vez de ser cortada. */}
                         <img
                           src={getMediaUrl(img.foto_url)}
                           alt=""
-                          className="w-20 h-20 object-cover rounded-xl border border-gray-100"
+                          className="h-24 w-auto rounded-xl bg-gray-100"
                         />
                       </button>
                     ))}
                     {anotacao.imagens.length > 3 && (
-                      <div className="w-20 h-20 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-xs font-black text-gray-400">
+                      <div className="h-24 px-4 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-black text-gray-400 shrink-0">
                         +{anotacao.imagens.length - 3}
                       </div>
                     )}
@@ -403,14 +404,14 @@ const AnotacoesPage = () => {
                     Fotos
                   </label>
 
-                  <div className="flex flex-wrap gap-2">
-                    {/* Já gravadas (edição) */}
+                  <div className="flex flex-wrap gap-2 items-start">
+                    {/* Já gravadas (edição) — sem borda e sem corte quadrado */}
                     {urlsExistentes.map((url, i) => (
-                      <div key={`existente-${i}`} className="relative">
+                      <div key={`existente-${i}`} className="relative shrink-0">
                         <img
                           src={getMediaUrl(url)}
                           alt=""
-                          className="w-20 h-20 object-cover rounded-xl border border-gray-100"
+                          className="h-24 w-auto rounded-xl bg-gray-100"
                         />
                         <button
                           type="button"
@@ -425,11 +426,11 @@ const AnotacoesPage = () => {
 
                     {/* Escolhidas nesta sessão (prévia local) */}
                     {novosArquivos.map((item, i) => (
-                      <div key={`novo-${i}`} className="relative">
+                      <div key={`novo-${i}`} className="relative shrink-0">
                         <img
                           src={item.preview}
                           alt=""
-                          className="w-20 h-20 object-cover rounded-xl border border-dashed border-whatsapp-teal/50"
+                          className="h-24 w-auto rounded-xl bg-gray-100"
                         />
                         <button
                           type="button"
@@ -445,7 +446,7 @@ const AnotacoesPage = () => {
                     <button
                       type="button"
                       onClick={() => setShowMediaPicker(true)}
-                      className="w-20 h-20 rounded-xl bg-gray-50 border border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal/40 active:scale-95 transition-all"
+                      className="h-24 min-w-[6rem] rounded-xl bg-gray-50 border border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal/40 active:scale-95 transition-all"
                     >
                       <ImagePlus size={22} />
                       <span className="text-[9px] font-black uppercase">Foto</span>
