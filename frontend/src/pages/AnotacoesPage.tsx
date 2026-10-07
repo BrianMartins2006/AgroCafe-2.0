@@ -317,30 +317,23 @@ const AnotacoesPage = () => {
                 )}
 
                 {anotacao.imagens.length > 0 && (
-                  <div className="flex gap-2 mt-4 overflow-x-auto no-scrollbar">
+                  <div className="flex gap-1 overflow-x-auto no-scrollbar mt-3">
                     {anotacao.imagens.slice(0, 3).map((img) => (
-                      <button
+                      <img
                         key={img.id}
+                        src={getMediaUrl(img.foto_url)}
+                        alt=""
                         onClick={() =>
                           abrirLightbox(
                             anotacao.imagens.map((i) => i.foto_url),
                             anotacao.imagens.findIndex((i) => i.id === img.id)
                           )
                         }
-                        className="shrink-0 active:scale-95 transition-all"
-                        aria-label="Ampliar foto"
-                      >
-                        {/* h-24 com largura natural: sem moldura quadrada, a foto
-                            mantém a proporção original em vez de ser cortada. */}
-                        <img
-                          src={getMediaUrl(img.foto_url)}
-                          alt=""
-                          className="h-24 w-auto rounded-xl bg-gray-100"
-                        />
-                      </button>
+                        className="w-20 h-20 object-cover rounded-lg border border-gray-50 shrink-0 cursor-pointer"
+                      />
                     ))}
                     {anotacao.imagens.length > 3 && (
-                      <div className="h-24 px-4 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-black text-gray-400 shrink-0">
+                      <div className="w-20 h-20 rounded-lg bg-gray-50 border border-gray-50 flex items-center justify-center text-xs font-black text-gray-400 shrink-0">
                         +{anotacao.imagens.length - 3}
                       </div>
                     )}
@@ -404,41 +397,35 @@ const AnotacoesPage = () => {
                     Fotos
                   </label>
 
-                  <div className="flex flex-wrap gap-2 items-start">
-                    {/* Já gravadas (edição) — sem borda e sem corte quadrado */}
+                  {/* Grid 3 colunas com remoção no canto — mesmo layout do
+                      ChatPage nas telas de novo/editar registro. */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* Já gravadas (edição) */}
                     {urlsExistentes.map((url, i) => (
-                      <div key={`existente-${i}`} className="relative shrink-0">
-                        <img
-                          src={getMediaUrl(url)}
-                          alt=""
-                          className="h-24 w-auto rounded-xl bg-gray-100"
-                        />
+                      <div key={`existente-${i}`} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm">
+                        <img src={getMediaUrl(url)} alt="" className="w-full h-full object-cover" />
                         <button
                           type="button"
                           onClick={() => removerExistente(i)}
                           aria-label="Remover foto"
-                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md active:scale-90 transition-all"
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md"
                         >
-                          <X size={12} />
+                          <X size={10} />
                         </button>
                       </div>
                     ))}
 
                     {/* Escolhidas nesta sessão (prévia local) */}
                     {novosArquivos.map((item, i) => (
-                      <div key={`novo-${i}`} className="relative shrink-0">
-                        <img
-                          src={item.preview}
-                          alt=""
-                          className="h-24 w-auto rounded-xl bg-gray-100"
-                        />
+                      <div key={`novo-${i}`} className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm">
+                        <img src={item.preview} alt="" className="w-full h-full object-cover" />
                         <button
                           type="button"
                           onClick={() => removerNovo(i)}
                           aria-label="Remover foto"
-                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md active:scale-90 transition-all"
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 shadow-md"
                         >
-                          <X size={12} />
+                          <X size={10} />
                         </button>
                       </div>
                     ))}
@@ -446,7 +433,7 @@ const AnotacoesPage = () => {
                     <button
                       type="button"
                       onClick={() => setShowMediaPicker(true)}
-                      className="h-24 min-w-[6rem] rounded-xl bg-gray-50 border border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal/40 active:scale-95 transition-all"
+                      className="aspect-square rounded-xl bg-gray-50 border border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-whatsapp-teal hover:border-whatsapp-teal/40 active:scale-95 transition-all"
                     >
                       <ImagePlus size={22} />
                       <span className="text-[9px] font-black uppercase">Foto</span>
@@ -533,7 +520,7 @@ const AnotacoesPage = () => {
             <img
               src={lightbox.urls[lightbox.index]}
               alt=""
-              className="max-w-[92vw] max-h-[85vh] object-contain rounded-xl"
+              className="max-w-full max-h-full object-contain rounded-lg select-none"
             />
           </div>
         )}
